@@ -1,0 +1,15 @@
+{
+  "block.regenerating_ore_veins.regenerator_block": "Regenerator Block",
+  "item.regenerating_ore_veins.regenerator_block": "Regenerator Block",
+  "itemGroup.regenerating_ore_veins": "Regenerating Ore Veins",
+  "screen.regenerating_ore_veins.regenerator_config": "Regenerator Block",
+  "screen.regenerating_ore_veins.target_block": "Target block",
+  "screen.regenerating_ore_veins.interval_seconds": "Interval seconds",
+  "screen.regenerating_ore_veins.jitter_min": "Jitter min",
+  "screen.regenerating_ore_veins.jitter_max": "Jitter max",
+  "message.regenerating_ore_veins.inspect": "Regenerates into: %1$s | Time remaining: %2$s | Interval: %3$s sec | Jitter: %4$s to %5$s sec",
+  "message.regenerating_ore_veins.no_target": "This regenerator block has no target block configured.",
+  "message.regenerating_ore_veins.config_saved": "Regenerator settings saved.",
+  "message.regenerating_ore_veins.invalid_config": "Enter a block id and valid whole-number timing values.",
+  "message.regenerating_ore_veins.invalid_target": "Invalid target block: %1$s"
+}

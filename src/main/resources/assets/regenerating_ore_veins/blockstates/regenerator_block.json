@@ -1,0 +1,7 @@
+{
+  "variants": {
+    "": {
+      "model": "regenerating_ore_veins:block/regenerator_block"
+    }
+  }
+}
