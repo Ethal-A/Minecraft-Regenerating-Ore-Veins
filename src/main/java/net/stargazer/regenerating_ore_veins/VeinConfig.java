@@ -62,6 +62,7 @@ public final class VeinConfig {
 
     public static void ensureDefaults() {
         GlobalConfig.ensureDefaultFile();
+        VeinLocatorConfig.ensureDefaultFile();
         try {
             Files.createDirectories(CONFIG_DIR);
             if (Files.notExists(AREAS_PATH)) {
@@ -146,13 +147,15 @@ public final class VeinConfig {
             return null;
         }
 
-        if (!"box".equals(type)) {
+        AreaShape shape = AreaShape.fromName(type);
+        if (shape == null) {
             RegeneratingOreVeins.LOGGER.warn("Unsupported area type '{}' for '{}'", type, name);
             return null;
         }
 
         return new AreaDefinition(
                 name,
+                shape,
                 dimension,
                 getInt(object, "x", 0),
                 getInt(object, "y", 64),
@@ -190,9 +193,9 @@ public final class VeinConfig {
         }
 
         List<Integer> weights = parseWeights(object.getAsJsonArray("weights"), blockStates.size());
-        String areaName = object.has("area") ? getString(object, "area", "") : "";
-        AreaDefinition area = areaName.isBlank() ? null : areas.get(areaName);
-        List<ResourceKey<Level>> dimensions = area != null ? List.of(area.dimension()) : parseDimensions(object.get("dimension"));
+        List<AreaDefinition> areaWhitelist = parseAreaList(object.get("area_whitelist"), areas);
+        List<AreaDefinition> areaBlacklist = parseAreaList(object.get("area_blacklist"), areas);
+        List<ResourceKey<Level>> dimensions = parseDimensions(object.get("dimension"));
         List<BiomeCriterion> biomes = parseBiomes(object.get("biome"));
 
         return new VeinDefinition(
@@ -209,11 +212,44 @@ public final class VeinConfig {
                 getInt(object, "max_y", 320),
                 Math.max(0.01D, getDouble(object, "chunk_minimum_generation_separation", 8.0D)),
                 clampUnit(getDouble(object, "fill_factor", GlobalConfig.get().defaultFillFactor())),
-                Math.max(1, getInt(object, "regeneration_interval_seconds", GlobalConfig.get().defaultRegenerationSeconds())),
+                Math.max(0, getInt(object, "regeneration_interval_seconds", GlobalConfig.get().defaultRegenerationSeconds())),
                 parseJitter(object.getAsJsonObject("regeneration_interval_jitter")),
-                areaName,
-                area
+                Collections.unmodifiableList(areaWhitelist),
+                Collections.unmodifiableList(areaBlacklist)
         );
+    }
+
+    private static List<AreaDefinition> parseAreaList(JsonElement element, Map<String, AreaDefinition> areas) {
+        if (element == null || element.isJsonNull()) {
+            return List.of();
+        }
+
+        List<AreaDefinition> result = new ArrayList<>();
+        if (element.isJsonArray()) {
+            for (JsonElement entry : element.getAsJsonArray()) {
+                if (entry.isJsonPrimitive()) {
+                    addArea(entry.getAsString(), areas, result);
+                }
+            }
+        } else if (element.isJsonPrimitive()) {
+            addArea(element.getAsString(), areas, result);
+        }
+
+        return result;
+    }
+
+    private static void addArea(String areaName, Map<String, AreaDefinition> areas, List<AreaDefinition> result) {
+        if (areaName.isBlank()) {
+            return;
+        }
+
+        AreaDefinition area = areas.get(areaName);
+        if (area == null) {
+            RegeneratingOreVeins.LOGGER.warn("Unknown area '{}'", areaName);
+            return;
+        }
+
+        result.add(area);
     }
 
     private static RegenerationIntervalJitter parseJitter(JsonObject object) {
@@ -337,7 +373,17 @@ public final class VeinConfig {
     }
 
     private static int getInt(JsonObject object, String key, int fallback) {
-        return object.has(key) ? object.get(key).getAsInt() : fallback;
+        if (!object.has(key)) {
+            return fallback;
+        }
+
+        try {
+            long value = object.get(key).getAsLong();
+            return (int) Math.max(Integer.MIN_VALUE, Math.min(Integer.MAX_VALUE, value));
+        } catch (RuntimeException exception) {
+            RegeneratingOreVeins.LOGGER.warn("Invalid integer value for vein config key '{}', using {}", key, fallback, exception);
+            return fallback;
+        }
     }
 
     private static double getDouble(JsonObject object, String key, double fallback) {
@@ -483,6 +529,7 @@ public final class VeinConfig {
 
     public record AreaDefinition(
             String name,
+            AreaShape shape,
             ResourceKey<Level> dimension,
             int x,
             int y,
@@ -491,16 +538,46 @@ public final class VeinConfig {
             int dimY,
             int dimZ
     ) {
-        public boolean contains(BlockPos pos) {
+        public boolean contains(ResourceKey<Level> dimension, BlockPos pos) {
+            if (!this.dimension.equals(dimension)) {
+                return false;
+            }
+
             int halfX = this.dimX / 2;
             int halfY = this.dimY / 2;
             int halfZ = this.dimZ / 2;
-            return pos.getX() >= this.x - halfX
+            boolean insideBounds = pos.getX() >= this.x - halfX
                     && pos.getX() <= this.x + halfX
                     && pos.getY() >= this.y - halfY
                     && pos.getY() <= this.y + halfY
                     && pos.getZ() >= this.z - halfZ
                     && pos.getZ() <= this.z + halfZ;
+            if (!insideBounds || this.shape == AreaShape.BOX) {
+                return insideBounds;
+            }
+
+            double radiusX = Math.max(0.5D, this.dimX / 2.0D);
+            double radiusZ = Math.max(0.5D, this.dimZ / 2.0D);
+            double dx = (pos.getX() - this.x) / radiusX;
+            double dz = (pos.getZ() - this.z) / radiusZ;
+            return dx * dx + dz * dz <= 1.0D;
+        }
+    }
+
+    public enum AreaShape {
+        BOX,
+        CIRCLE;
+
+        public static AreaShape fromName(String name) {
+            if ("box".equalsIgnoreCase(name)) {
+                return BOX;
+            }
+
+            if ("circle".equalsIgnoreCase(name)) {
+                return CIRCLE;
+            }
+
+            return null;
         }
     }
 
@@ -546,8 +623,8 @@ public final class VeinConfig {
             double fillFactor,
             int regenerationIntervalSeconds,
             RegenerationIntervalJitter regenerationIntervalJitter,
-            String areaName,
-            AreaDefinition area
+            List<AreaDefinition> areaWhitelist,
+            List<AreaDefinition> areaBlacklist
     ) {
         public VeinDefinition {
             Objects.requireNonNull(id, "id");
@@ -557,6 +634,8 @@ public final class VeinConfig {
             Objects.requireNonNull(weights, "weights");
             Objects.requireNonNull(shape, "shape");
             Objects.requireNonNull(regenerationIntervalJitter, "regenerationIntervalJitter");
+            Objects.requireNonNull(areaWhitelist, "areaWhitelist");
+            Objects.requireNonNull(areaBlacklist, "areaBlacklist");
         }
 
         public boolean matchesDimension(ResourceKey<Level> dimension) {
@@ -570,6 +649,36 @@ public final class VeinConfig {
 
             for (BiomeCriterion criterion : this.biomes) {
                 if (criterion.matches(biome)) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        public boolean allowsPosition(ResourceKey<Level> dimension, BlockPos pos) {
+            for (AreaDefinition area : this.areaBlacklist) {
+                if (area.contains(dimension, pos)) {
+                    return false;
+                }
+            }
+
+            if (this.areaWhitelist.isEmpty()) {
+                return true;
+            }
+
+            for (AreaDefinition area : this.areaWhitelist) {
+                if (area.contains(dimension, pos)) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        public boolean containsBlock(BlockState state) {
+            for (BlockState blockState : this.blocks) {
+                if (blockState.is(state.getBlock())) {
                     return true;
                 }
             }

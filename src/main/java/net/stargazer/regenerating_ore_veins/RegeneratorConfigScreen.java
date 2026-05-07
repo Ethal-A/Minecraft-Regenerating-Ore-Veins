@@ -90,7 +90,7 @@ public final class RegeneratorConfigScreen extends Screen {
         int jitterMax;
         try {
             target = ResourceLocation.parse(this.targetBox.getValue().trim());
-            interval = Math.max(1, Integer.parseInt(this.intervalBox.getValue().trim()));
+            interval = Math.max(0, Integer.parseInt(this.intervalBox.getValue().trim()));
             jitterMin = parseOptionalInt(this.jitterMinBox.getValue());
             jitterMax = parseOptionalInt(this.jitterMaxBox.getValue());
         } catch (RuntimeException exception) {

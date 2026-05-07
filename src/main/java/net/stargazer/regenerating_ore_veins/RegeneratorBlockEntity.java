@@ -67,7 +67,7 @@ public final class RegeneratorBlockEntity extends BlockEntity {
 
     public void setConfiguration(BlockState targetState, int intervalSeconds, int jitterRangeMinSeconds, int jitterRangeMaxSeconds) {
         this.targetState = targetState;
-        this.intervalSeconds = Math.max(1, intervalSeconds);
+        this.intervalSeconds = Math.max(0, intervalSeconds);
         this.jitterRangeMinSeconds = Math.min(jitterRangeMinSeconds, jitterRangeMaxSeconds);
         this.jitterRangeMaxSeconds = Math.max(jitterRangeMinSeconds, jitterRangeMaxSeconds);
         this.effectiveIntervalSeconds = VeinRuntime.applyIntervalJitter(this.intervalSeconds, this.jitterRangeMinSeconds, this.jitterRangeMaxSeconds, this.level == null ? null : this.level.random);
@@ -159,8 +159,8 @@ public final class RegeneratorBlockEntity extends BlockEntity {
             this.targetState = NbtUtils.readBlockState(registries.lookupOrThrow(net.minecraft.core.registries.Registries.BLOCK), tag.getCompound("TargetState"));
         }
 
-        this.intervalSeconds = tag.contains("IntervalSeconds") ? Math.max(1, tag.getInt("IntervalSeconds")) : GlobalConfig.get().defaultRegenerationSeconds();
-        this.effectiveIntervalSeconds = tag.contains("EffectiveIntervalSeconds") ? Math.max(1, tag.getInt("EffectiveIntervalSeconds")) : this.intervalSeconds;
+        this.intervalSeconds = tag.contains("IntervalSeconds") ? Math.max(0, tag.getInt("IntervalSeconds")) : GlobalConfig.get().defaultRegenerationSeconds();
+        this.effectiveIntervalSeconds = tag.contains("EffectiveIntervalSeconds") ? Math.max(0, tag.getInt("EffectiveIntervalSeconds")) : this.intervalSeconds;
         this.jitterRangeMinSeconds = tag.getInt("JitterRangeMinSeconds");
         this.jitterRangeMaxSeconds = tag.getInt("JitterRangeMaxSeconds");
         if (this.jitterRangeMinSeconds > this.jitterRangeMaxSeconds) {
@@ -199,11 +199,12 @@ public final class RegeneratorBlockEntity extends BlockEntity {
                 this.worldPosition,
                 new VeinSavedData.VeinEntry(
                         this.targetState,
-                        Math.max(1, this.intervalSeconds),
-                        Math.max(1, this.effectiveIntervalSeconds),
+                        Math.max(0, this.intervalSeconds),
+                        Math.max(0, this.effectiveIntervalSeconds),
                         this.jitterRangeMinSeconds,
                         this.jitterRangeMaxSeconds,
-                        lastMined
+                        lastMined,
+                        ""
                 )
         );
         this.lastMinedEpochSecond = lastMined;

@@ -36,6 +36,19 @@ public final class GeneratedVeinPackResources extends AbstractPackResources {
             ResourceLocation locationId = ResourceLocation.fromNamespaceAndPath(RegeneratingOreVeins.MOD_ID, "worldgen/structure/" + vein.id() + ".json");
             this.resources.put(locationId, buildStructureJson(vein).getBytes(StandardCharsets.UTF_8));
         }
+
+        VeinLocatorConfig.Values locatorConfig = VeinLocatorConfig.loadFromDisk();
+        if (locatorConfig.allowCrafting()) {
+            this.resources.put(
+                    ResourceLocation.fromNamespaceAndPath(RegeneratingOreVeins.MOD_ID, "recipe/vein_locator.json"),
+                    buildVeinLocatorRecipeJson(locatorConfig).getBytes(StandardCharsets.UTF_8)
+            );
+        }
+
+        this.resources.put(
+                ResourceLocation.fromNamespaceAndPath(RegeneratingOreVeins.MOD_ID, "recipe/vein_locator_tuning.json"),
+                buildVeinLocatorTuningRecipeJson().getBytes(StandardCharsets.UTF_8)
+        );
     }
 
     public static Pack createPack() {
@@ -104,6 +117,78 @@ public final class GeneratedVeinPackResources extends AbstractPackResources {
                   "step": "underground_ores"
                 }
                 """.formatted(RegeneratingOreVeins.MOD_ID, vein.id(), biomeSelectorJson(vein));
+    }
+
+    private static String buildVeinLocatorRecipeJson(VeinLocatorConfig.Values config) {
+        if (config.craftAnyOrder()) {
+            String ingredients = config.craftingRecipe()
+                    .stream()
+                    .map(location -> "    { \"item\": " + quote(location.toString()) + " }")
+                    .collect(java.util.stream.Collectors.joining(",\n"));
+            return """
+                    {
+                      "type": "minecraft:crafting_shapeless",
+                      "category": "misc",
+                      "ingredients": [
+                    %s
+                      ],
+                      "result": {
+                        "id": "%s:vein_locator",
+                        "count": 1
+                      }
+                    }
+                    """.formatted(ingredients, RegeneratingOreVeins.MOD_ID);
+        }
+
+        java.util.List<String> patternRows = new java.util.ArrayList<>();
+        StringBuilder keys = new StringBuilder();
+        for (int i = 0; i < config.craftingRecipe().size(); i++) {
+            char key = (char) ('A' + i);
+            int row = i / 3;
+            if (patternRows.size() <= row) {
+                patternRows.add("");
+            }
+
+            patternRows.set(row, patternRows.get(row) + key);
+            if (i > 0) {
+                keys.append(",\n");
+            }
+
+            keys.append("    ")
+                    .append(quote(String.valueOf(key)))
+                    .append(": { \"item\": ")
+                    .append(quote(config.craftingRecipe().get(i).toString()))
+                    .append(" }");
+        }
+
+        String pattern = patternRows.stream()
+                .map(row -> "    " + quote(row))
+                .collect(java.util.stream.Collectors.joining(",\n"));
+        return """
+                {
+                  "type": "minecraft:crafting_shaped",
+                  "category": "misc",
+                  "pattern": [
+                %s
+                  ],
+                  "key": {
+                %s
+                  },
+                  "result": {
+                    "id": "%s:vein_locator",
+                    "count": 1
+                  }
+                }
+                """.formatted(pattern, keys, RegeneratingOreVeins.MOD_ID);
+    }
+
+    private static String buildVeinLocatorTuningRecipeJson() {
+        return """
+                {
+                  "type": "%s:vein_locator_tuning",
+                  "category": "misc"
+                }
+                """.formatted(RegeneratingOreVeins.MOD_ID);
     }
 
     private static String biomeSelectorJson(VeinConfig.VeinDefinition vein) {

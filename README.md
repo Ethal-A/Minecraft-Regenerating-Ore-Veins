@@ -87,6 +87,7 @@ The mod creates these files under:
 - `config/regenerating_ore_veins/areas.json`
 - `config/regenerating_ore_veins/veins.json`
 - `config/regenerating_ore_veins/global.json`
+- `config/regenerating_ore_veins/vein_locator.json`
 
 ### `areas.json`
 The following example shows how you can create an area (note this is heavily inspired by the mod, In Control!).
@@ -107,7 +108,10 @@ The following example shows how you can create an area (note this is heavily ins
 ]
 ```
 
-`type` currently supports `box`.
+`type` supports:
+
+- `box`: rectangular prism using `dimx`, `dimy`, and `dimz`
+- `circle`: horizontal ellipse/cylinder using `dimx` and `dimz` as diameters, plus `dimy` as the vertical height
 
 ### `veins.json`
 The following example shows how you can configure a vein.
@@ -135,6 +139,10 @@ The following example shows how you can configure a vein.
       "#c:is_jungle",
       "minecraft:nether_wastes"
     ],
+    "area_whitelist": [
+      "frontier_0"
+    ],
+    "area_blacklist": [],
     "shape": "circle",
     "min_size": 12,
     "max_size": 24,
@@ -154,8 +162,9 @@ The following example shows how you can configure a vein.
 
 Supported/optional fields:
 
-- `area` what area the vein generation is limited to
-- `dimension` when no area is used: accepts a string or list and defaults to `minecraft:overworld`. The vanilla Nether id is `minecraft:the_nether`, though `minecraft:nether` is accepted as an alias.
+- `area_whitelist` accepts a string or list of area names. If provided, the vein only generates inside those areas.
+- `area_blacklist` accepts a string or list of area names. If provided, the vein never generates inside those areas.
+- `dimension` accepts a string or list and defaults to `minecraft:overworld`. The vanilla Nether id is `minecraft:the_nether`, though `minecraft:nether` is accepted as an alias.
 - `biome` accepts a string or list. Entries can be exact biome ids such as `minecraft:plains` or tags prefixed with `#`, such as `#c:is_jungle`.
 - `weights` defaults to `1` for each block
 - `shape` supports `circle` and `box`
@@ -165,7 +174,40 @@ Supported/optional fields:
 - `regeneration_interval_seconds` defaults to `global.json` value `default_regeneration_seconds`
 - `regeneration_interval_jitter` defaults to `global.json` value `default_jitter_interval`
 
-If both `area` and `dimension` are set, the area's dimension is used. Biome filtering still applies after the area and dimension match. The default `veins.json` examples are not area-constrained and include Overworld and Nether examples. Vanilla Minecraft does not have separate Overworld quartz ore or netherite ore blocks, so the default examples use `minecraft:quartz_block` for the quartz example and `minecraft:ancient_debris` for netherite.
+If whitelist and blacklist overlap, `area_blacklist` wins. `dimension` is still applied when area filters are present, so admins can combine dimension, area, biome, and Y-level limits. The default `veins.json` examples are not area-constrained and include Overworld and Nether examples. Vanilla Minecraft does not have separate Overworld quartz ore or netherite ore blocks, so the default examples use `minecraft:quartz_block` for the quartz example and `minecraft:ancient_debris` for netherite.
+
+### `vein_locator.json`
+
+```json
+{
+  "allow_crafting": true,
+  "allow_use": true,
+  "crafting_recipe": [
+    "minecraft:netherite_ingot",
+    "minecraft:ender_eye"
+  ],
+  "craft_any_order": true,
+  "chance_to_break": 0.75,
+  "use_durability": false,
+  "durability": 2,
+  "stack_size": 64
+}
+```
+
+The `Vein Locator` is crafted from the configured recipe. Because the recipe is generated as a normal server datapack recipe, JEI can display it after recipes reload.
+
+Tune a locator by crafting it with any block item. The output locator stores that block as its target. When used, it flies like an eye of ender toward the nearest tracked regenerating vein block in the current dimension with the same target block.
+
+- `allow_crafting` controls the base locator recipe
+- `allow_use` disables locator usage server-side
+- `crafting_recipe` is a list of item ids. `minecraft:netherite` is accepted as an alias for `minecraft:netherite_ingot`.
+- `craft_any_order` uses a shapeless recipe when true and a shaped row recipe when false
+- `chance_to_break` is a `0.0..1.0` chance to remove one locator from the held stack, used only when `use_durability` is false
+- `use_durability` switches the item to configured durability loss instead of random break chance. In this mode the thrown locator signal always shows the break effect, and the held locator loses durability.
+- `durability` controls how many successful uses the locator has when `use_durability` is true
+- `stack_size` controls the max stack size when `use_durability` is false and defaults to `64`
+
+When `use_durability` is true, vein locators are not stackable. If this is turned on while players already have stacked locators, the mod splits those stacks safely during inventory updates or when a player uses a stack. If `use_durability` is later turned off, durability data is removed from existing locators during inventory updates or use and they can stack again using `stack_size`.
 
 ## Manual Placement
 
@@ -175,7 +217,7 @@ Each vein id is also exposed as a generated structure id:
 /place structure regenerating_ore_veins:diamond_ore
 ```
 
-This uses the current `veins.json` ids that were available when the datapacks loaded. Manual placement ignores the vein's `area` limit so you can test a vein at your current location.
+This uses the current `veins.json` ids that were available when the datapacks loaded. Manual placement ignores the vein's area whitelist and blacklist so you can test a vein at your current location.
 
 The mod also provides its own placement command:
 
@@ -186,6 +228,34 @@ The mod also provides its own placement command:
 
 Use this command when testing config changes. It reads the mod config directly and places the vein at the command source position.
 
+## Updating Existing Veins
+
+After changing `veins.json`, update tracked existing placements without regenerating whole chunks:
+
+```mcfunction
+/rov update_existing
+/rov update_existing id diamond_ore
+/rov update_existing area frontier_0
+/rov update_existing id diamond_ore area frontier_0
+/rov update_existing area frontier_0 id diamond_ore
+/rov update_existing regenerate
+/rov update_existing regenerate id diamond_ore
+/rov update_existing regenerate area frontier_0
+/rov update_existing regenerate id diamond_ore area frontier_0
+```
+
+The full command prefix also works:
+
+```mcfunction
+/regenerating_ore_veins update_existing id diamond_ore
+```
+
+This updates the mod's saved vein entries to the current configuration: interval seconds, jitter, stored vein id, and target block if the old target is no longer part of the configured vein. It does not force-load chunks. For unloaded chunks, saved data is updated immediately and any needed block-state correction happens later when the chunk naturally loads and the mod validates the tracked entry.
+
+The main safety rule is that the command only touches loaded world blocks when the block is still the exact old tracked target or the regenerator block entity is present. This avoids overwriting unrelated player edits. Old saved entries created before vein ids were stored can still be updated when the target block uniquely identifies the vein, or when an explicit `id` is provided and that vein contains the target block.
+
+Adding `regenerate` rebuilds already tracked vein groups using the current `shape`, `min_size`, `max_size`, and `fill_factor`. The command reconstructs groups from nearby tracked blocks with the same vein id, removes old tracked positions, creates new tracked positions around the group's center, and queues cleanup/placement work for unloaded chunks. It still avoids force-loading chunks. When those chunks load later, queued cleanup removes old generated ore/regenerator blocks only if they still look like the old tracked blocks, and queued placement writes new ore only into safe replaceable/natural blocks. If a player has built something else there, the queued placement is skipped and that new saved entry is removed instead of overwriting the build.
+
 ## Reloading Config
 
 Reload the mod's JSON config without restarting the server:
@@ -195,9 +265,11 @@ Reload the mod's JSON config without restarting the server:
 /regenerating_ore_veins reload
 ```
 
-This reloads `global.json`, `areas.json`, and `veins.json` for runtime generation and `/rov place`. Vanilla `/place structure regenerating_ore_veins:<id>` uses generated datapack structure ids, so adding or removing vein ids may still require Minecraft's `/reload` or a world restart for those structure ids to refresh.
+This reloads `global.json`, `areas.json`, `veins.json`, and `vein_locator.json` for runtime generation, `/rov place`, `/rov update_existing`, locator use, locator durability, and locator stack size. Vanilla `/place structure regenerating_ore_veins:<id>` and generated crafting recipes use datapack resources, so adding or removing vein ids or changing recipes may still require Minecraft's `/reload` or a world restart for those resources to refresh.
 
-Natural generation does respect `area`. The default `frontier_0` example is centered at `x=0, z=0` and is `8192` blocks wide/deep, so it covers roughly `x=-4096..4096` and `z=-4096..4096`.
+Note that this reload will not change the crafting recipe immediately, and you will need to restart the world (save and quit then open the world again) for the recipe changes to take effect.
+
+Natural generation does respect `area_whitelist` and `area_blacklist`. The default `frontier_0` example is centered at `x=0, z=0` and is `8192` blocks wide/deep, so it covers roughly `x=-4096..4096` and `z=-4096..4096`.
 
 ## Notes
 

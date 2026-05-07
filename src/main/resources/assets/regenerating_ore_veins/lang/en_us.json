@@ -1,6 +1,7 @@
 {
   "block.regenerating_ore_veins.regenerator_block": "Regenerator Block",
   "item.regenerating_ore_veins.regenerator_block": "Regenerator Block",
+  "item.regenerating_ore_veins.vein_locator": "Vein Locator",
   "itemGroup.regenerating_ore_veins": "Regenerating Ore Veins",
   "screen.regenerating_ore_veins.regenerator_config": "Regenerator Block",
   "screen.regenerating_ore_veins.target_block": "Target block",
@@ -11,5 +12,11 @@
   "message.regenerating_ore_veins.no_target": "This regenerator block has no target block configured.",
   "message.regenerating_ore_veins.config_saved": "Regenerator settings saved.",
   "message.regenerating_ore_veins.invalid_config": "Enter a block id and valid whole-number timing values.",
-  "message.regenerating_ore_veins.invalid_target": "Invalid target block: %1$s"
+  "message.regenerating_ore_veins.invalid_target": "Invalid target block: %1$s",
+  "message.regenerating_ore_veins.locator_disabled": "Vein locator usage is disabled by the server.",
+  "message.regenerating_ore_veins.locator_not_attuned": "This vein locator is not attuned to a block.",
+  "message.regenerating_ore_veins.locator_no_match": "No tracked vein containing %1$s was found in this dimension.",
+  "message.regenerating_ore_veins.locator_found": "Locating nearest vein containing %1$s.",
+  "tooltip.regenerating_ore_veins.vein_locator_attuned": "Attuned to: %1$s",
+  "tooltip.regenerating_ore_veins.vein_locator_unattuned": "Not attuned"
 }

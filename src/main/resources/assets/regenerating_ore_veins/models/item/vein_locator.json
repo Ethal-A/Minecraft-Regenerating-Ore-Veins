@@ -1,0 +1,6 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "regenerating_ore_veins:item/vein_locator"
+  }
+}

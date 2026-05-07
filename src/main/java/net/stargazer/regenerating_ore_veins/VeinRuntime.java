@@ -4,11 +4,14 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import it.unimi.dsi.fastutil.longs.LongLinkedOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.ParticleTypes;
@@ -53,6 +56,7 @@ public final class VeinRuntime {
                         .then(Commands.literal("reload").executes(VeinRuntime::reloadCommand))
                         .then(Commands.literal("place")
                                 .then(Commands.argument("id", StringArgumentType.word()).executes(VeinRuntime::placeCommand)))
+                        .then(updateExistingCommandTree())
         );
         event.getDispatcher().register(
                 Commands.literal("rov")
@@ -60,7 +64,43 @@ public final class VeinRuntime {
                         .then(Commands.literal("reload").executes(VeinRuntime::reloadCommand))
                         .then(Commands.literal("place")
                                 .then(Commands.argument("id", StringArgumentType.word()).executes(VeinRuntime::placeCommand)))
+                        .then(updateExistingCommandTree())
         );
+    }
+
+    private static com.mojang.brigadier.builder.LiteralArgumentBuilder<CommandSourceStack> updateExistingCommandTree() {
+        return Commands.literal("update_existing")
+                .executes(context -> updateExistingCommand(context, "", "", false))
+                .then(updateExistingModeTree("regenerate", true))
+                .then(Commands.literal("id")
+                        .then(Commands.argument("id", StringArgumentType.word())
+                                .executes(context -> updateExistingCommand(context, StringArgumentType.getString(context, "id"), "", false))
+                                .then(Commands.literal("area")
+                                        .then(Commands.argument("area", StringArgumentType.word())
+                                                .executes(context -> updateExistingCommand(context, StringArgumentType.getString(context, "id"), StringArgumentType.getString(context, "area"), false))))))
+                .then(Commands.literal("area")
+                        .then(Commands.argument("area", StringArgumentType.word())
+                                .executes(context -> updateExistingCommand(context, "", StringArgumentType.getString(context, "area"), false))
+                                .then(Commands.literal("id")
+                                        .then(Commands.argument("id", StringArgumentType.word())
+                                                .executes(context -> updateExistingCommand(context, StringArgumentType.getString(context, "id"), StringArgumentType.getString(context, "area"), false))))));
+    }
+
+    private static com.mojang.brigadier.builder.LiteralArgumentBuilder<CommandSourceStack> updateExistingModeTree(String name, boolean regenerate) {
+        return Commands.literal(name)
+                .executes(context -> updateExistingCommand(context, "", "", regenerate))
+                .then(Commands.literal("id")
+                        .then(Commands.argument("id", StringArgumentType.word())
+                                .executes(context -> updateExistingCommand(context, StringArgumentType.getString(context, "id"), "", regenerate))
+                                .then(Commands.literal("area")
+                                        .then(Commands.argument("area", StringArgumentType.word())
+                                                .executes(context -> updateExistingCommand(context, StringArgumentType.getString(context, "id"), StringArgumentType.getString(context, "area"), regenerate))))))
+                .then(Commands.literal("area")
+                        .then(Commands.argument("area", StringArgumentType.word())
+                                .executes(context -> updateExistingCommand(context, "", StringArgumentType.getString(context, "area"), regenerate))
+                                .then(Commands.literal("id")
+                                        .then(Commands.argument("id", StringArgumentType.word())
+                                                .executes(context -> updateExistingCommand(context, StringArgumentType.getString(context, "id"), StringArgumentType.getString(context, "area"), regenerate))))));
     }
 
     public static void onAddPackFinders(AddPackFindersEvent event) {
@@ -83,6 +123,7 @@ public final class VeinRuntime {
 
     private static int reloadCommand(CommandContext<CommandSourceStack> context) {
         GlobalConfig.loadFromDisk();
+        VeinLocatorConfig.loadFromDisk();
         VeinConfig.LoadedConfig config = VeinConfig.loadFromDisk();
         context.getSource().sendSuccess(
                 () -> Component.literal("Reloaded Regenerating Ore Veins config: " + config.veinsById().size() + " veins, " + config.areasByName().size() + " areas."),
@@ -107,6 +148,444 @@ public final class VeinRuntime {
                 true
         );
         return placed;
+    }
+
+    private static int updateExistingCommand(CommandContext<CommandSourceStack> context, String veinId, String areaName, boolean regenerate) {
+        GlobalConfig.loadFromDisk();
+        VeinLocatorConfig.loadFromDisk();
+        VeinConfig.LoadedConfig config = VeinConfig.loadFromDisk();
+        VeinConfig.VeinDefinition requestedVein = null;
+        if (!veinId.isBlank()) {
+            requestedVein = config.veinsById().get(veinId);
+            if (requestedVein == null) {
+                context.getSource().sendFailure(Component.literal("Unknown Regenerating Ore Veins vein id: " + veinId));
+                return 0;
+            }
+        }
+
+        VeinConfig.AreaDefinition area = null;
+        if (!areaName.isBlank()) {
+            area = config.areasByName().get(areaName);
+            if (area == null) {
+                context.getSource().sendFailure(Component.literal("Unknown Regenerating Ore Veins area: " + areaName));
+                return 0;
+            }
+        }
+
+        ExistingVeinUpdateResult total = ExistingVeinUpdateResult.ZERO;
+        for (ServerLevel level : context.getSource().getServer().getAllLevels()) {
+            total = total.plus(regenerate
+                    ? regenerateExistingVeinEntries(level, config, requestedVein, area)
+                    : updateExistingVeinEntries(level, config, requestedVein, area));
+        }
+
+        ExistingVeinUpdateResult finalTotal = total;
+        context.getSource().sendSuccess(
+                () -> Component.literal(
+                        (regenerate ? "Regenerated" : "Updated")
+                                + " existing Regenerating Ore Veins entries: "
+                                + finalTotal.updated()
+                                + " updated, "
+                                + finalTotal.loadedTouched()
+                                + " loaded blocks touched, "
+                                + finalTotal.scanned()
+                                + " scanned, "
+                                + finalTotal.skippedNoConfig()
+                                + " skipped without matching config, "
+                                + finalTotal.errors()
+                                + " errors."
+                ),
+                true
+        );
+        return total.updated();
+    }
+
+    private static ExistingVeinUpdateResult updateExistingVeinEntries(
+            ServerLevel level,
+            VeinConfig.LoadedConfig config,
+            VeinConfig.VeinDefinition requestedVein,
+            VeinConfig.AreaDefinition area
+    ) {
+        VeinSavedData savedData = VeinSavedData.get(level);
+        long[] positions = savedData.entryPositions();
+        int updated = 0;
+        int loadedTouched = 0;
+        int skippedNoConfig = 0;
+        int errors = 0;
+
+        for (long packedPos : positions) {
+            BlockPos pos = BlockPos.of(packedPos);
+            if (area != null && !area.contains(level.dimension(), pos)) {
+                continue;
+            }
+
+            try {
+                VeinSavedData.VeinEntry entry = savedData.getEntry(pos);
+                if (entry == null) {
+                    continue;
+                }
+
+                VeinConfig.VeinDefinition vein = resolveVeinForExistingEntry(config, requestedVein, entry);
+                if (vein == null) {
+                    skippedNoConfig++;
+                    continue;
+                }
+
+                BlockState oldTarget = entry.targetState();
+                BlockState newTarget = vein.containsBlock(oldTarget) ? oldTarget : vein.pickBlockState(level.random);
+                int effectiveInterval = VeinRuntime.applyIntervalJitter(
+                        vein.regenerationIntervalSeconds(),
+                        vein.regenerationIntervalJitter().rangeMin(),
+                        vein.regenerationIntervalJitter().rangeMax(),
+                        level.random
+                );
+                VeinSavedData.VeinEntry updatedEntry = new VeinSavedData.VeinEntry(
+                        newTarget,
+                        vein.regenerationIntervalSeconds(),
+                        effectiveInterval,
+                        vein.regenerationIntervalJitter().rangeMin(),
+                        vein.regenerationIntervalJitter().rangeMax(),
+                        entry.lastMinedEpochSecond(),
+                        vein.id()
+                );
+
+                savedData.putEntry(pos, updatedEntry);
+                if (level.hasChunkAt(pos)) {
+                    loadedTouched += updateLoadedExistingVeinBlock(level, pos, oldTarget, updatedEntry);
+                }
+
+                updated++;
+            } catch (RuntimeException exception) {
+                errors++;
+                RegeneratingOreVeins.LOGGER.error("Failed to update existing vein entry at {} in {}", pos, level.dimension().location(), exception);
+            }
+        }
+
+        return new ExistingVeinUpdateResult(positions.length, updated, loadedTouched, skippedNoConfig, errors);
+    }
+
+    private static ExistingVeinUpdateResult regenerateExistingVeinEntries(
+            ServerLevel level,
+            VeinConfig.LoadedConfig config,
+            VeinConfig.VeinDefinition requestedVein,
+            VeinConfig.AreaDefinition area
+    ) {
+        VeinSavedData savedData = VeinSavedData.get(level);
+        List<ExistingTrackedEntry> candidates = new ArrayList<>();
+        int skippedNoConfig = 0;
+        int errors = 0;
+
+        for (long packedPos : savedData.entryPositions()) {
+            BlockPos pos = BlockPos.of(packedPos);
+            if (area != null && !area.contains(level.dimension(), pos)) {
+                continue;
+            }
+
+            try {
+                VeinSavedData.VeinEntry entry = savedData.getEntry(pos);
+                if (entry == null) {
+                    continue;
+                }
+
+                VeinConfig.VeinDefinition vein = resolveVeinForExistingEntry(config, requestedVein, entry);
+                if (vein == null) {
+                    skippedNoConfig++;
+                    continue;
+                }
+
+                candidates.add(new ExistingTrackedEntry(pos, entry, vein));
+            } catch (RuntimeException exception) {
+                errors++;
+                RegeneratingOreVeins.LOGGER.error("Failed to inspect existing vein entry at {} in {}", pos, level.dimension().location(), exception);
+            }
+        }
+
+        int updated = 0;
+        int loadedTouched = 0;
+        for (List<ExistingTrackedEntry> group : groupExistingEntries(candidates)) {
+            try {
+                RegenerateGroupResult result = regenerateExistingGroup(level, savedData, group, area);
+                updated += result.updated();
+                loadedTouched += result.loadedTouched();
+            } catch (RuntimeException exception) {
+                errors++;
+                RegeneratingOreVeins.LOGGER.error("Failed to regenerate existing vein group in {}", level.dimension().location(), exception);
+            }
+        }
+
+        return new ExistingVeinUpdateResult(candidates.size(), updated, loadedTouched, skippedNoConfig, errors);
+    }
+
+    private static List<List<ExistingTrackedEntry>> groupExistingEntries(List<ExistingTrackedEntry> entries) {
+        List<List<ExistingTrackedEntry>> groups = new ArrayList<>();
+        Set<Integer> visited = new HashSet<>();
+        for (int i = 0; i < entries.size(); i++) {
+            if (!visited.add(i)) {
+                continue;
+            }
+
+            VeinConfig.VeinDefinition vein = entries.get(i).vein();
+            int linkDistance = Math.max(6, vein.estimatedRadius() * 4);
+            int linkDistanceSqr = linkDistance * linkDistance;
+            List<ExistingTrackedEntry> group = new ArrayList<>();
+            ArrayDeque<Integer> queue = new ArrayDeque<>();
+            queue.add(i);
+            while (!queue.isEmpty()) {
+                int current = queue.removeFirst();
+                ExistingTrackedEntry currentEntry = entries.get(current);
+                group.add(currentEntry);
+                for (int j = 0; j < entries.size(); j++) {
+                    if (visited.contains(j)) {
+                        continue;
+                    }
+
+                    ExistingTrackedEntry candidate = entries.get(j);
+                    if (!candidate.vein().id().equals(vein.id())) {
+                        continue;
+                    }
+
+                    if (currentEntry.pos().distSqr(candidate.pos()) <= linkDistanceSqr) {
+                        visited.add(j);
+                        queue.add(j);
+                    }
+                }
+            }
+
+            groups.add(group);
+        }
+
+        return groups;
+    }
+
+    private static RegenerateGroupResult regenerateExistingGroup(
+            ServerLevel level,
+            VeinSavedData savedData,
+            List<ExistingTrackedEntry> group,
+            VeinConfig.AreaDefinition commandArea
+    ) {
+        if (group.isEmpty()) {
+            return RegenerateGroupResult.ZERO;
+        }
+
+        VeinConfig.VeinDefinition vein = group.getFirst().vein();
+        BlockPos center = averagePosition(group);
+        RandomSource random = RandomSource.create(mixSeed(level.getSeed(), new ChunkPos(center), vein.id() + ":regenerate:" + center.asLong()));
+        List<BlockPos> newPositions = computeShapePositions(center, vein, random);
+        Set<Long> newPositionSet = new HashSet<>();
+        Map<Long, VeinSavedData.VeinEntry> newEntries = new HashMap<>();
+        for (BlockPos pos : newPositions) {
+            if (!level.isInWorldBounds(pos) || !vein.allowsPosition(level.dimension(), pos) || commandArea != null && !commandArea.contains(level.dimension(), pos)) {
+                continue;
+            }
+
+            BlockState targetState = vein.pickBlockState(random);
+            int effectiveInterval = applyIntervalJitter(vein.regenerationIntervalSeconds(), vein.regenerationIntervalJitter().rangeMin(), vein.regenerationIntervalJitter().rangeMax(), random);
+            VeinSavedData.VeinEntry entry = new VeinSavedData.VeinEntry(
+                    targetState,
+                    vein.regenerationIntervalSeconds(),
+                    effectiveInterval,
+                    vein.regenerationIntervalJitter().rangeMin(),
+                    vein.regenerationIntervalJitter().rangeMax(),
+                    VeinSavedData.ACTIVE_LAST_MINED,
+                    vein.id()
+            );
+            newPositionSet.add(pos.asLong());
+            newEntries.put(pos.asLong(), entry);
+        }
+
+        int updated = 0;
+        int loadedTouched = 0;
+        for (ExistingTrackedEntry oldEntry : group) {
+            if (newPositionSet.contains(oldEntry.pos().asLong())) {
+                continue;
+            }
+
+            savedData.queueCleanup(oldEntry.pos(), oldEntry.entry().targetState());
+            savedData.removeEntry(oldEntry.pos());
+            if (level.hasChunkAt(oldEntry.pos())) {
+                loadedTouched += applyPendingCleanup(level, savedData, oldEntry.pos());
+            }
+
+            updated++;
+        }
+
+        for (Map.Entry<Long, VeinSavedData.VeinEntry> mapEntry : newEntries.entrySet()) {
+            BlockPos pos = BlockPos.of(mapEntry.getKey());
+            savedData.putEntry(pos, mapEntry.getValue());
+            savedData.queuePlacement(pos);
+            if (level.hasChunkAt(pos)) {
+                loadedTouched += applyPendingPlacement(level, savedData, pos);
+            }
+
+            updated++;
+        }
+
+        return new RegenerateGroupResult(updated, loadedTouched);
+    }
+
+    private static BlockPos averagePosition(List<ExistingTrackedEntry> group) {
+        long x = 0L;
+        long y = 0L;
+        long z = 0L;
+        for (ExistingTrackedEntry entry : group) {
+            x += entry.pos().getX();
+            y += entry.pos().getY();
+            z += entry.pos().getZ();
+        }
+
+        int size = Math.max(1, group.size());
+        return new BlockPos(Math.round(x / (float) size), Math.round(y / (float) size), Math.round(z / (float) size));
+    }
+
+    private static int updateLoadedExistingVeinBlock(ServerLevel level, BlockPos pos, BlockState oldTarget, VeinSavedData.VeinEntry updatedEntry) {
+        BlockState current = level.getBlockState(pos);
+        if (current.is(ModContent.REGENERATOR_BLOCK.get())) {
+            if (level.getBlockEntity(pos) instanceof RegeneratorBlockEntity blockEntity) {
+                blockEntity.configureFromEntry(updatedEntry);
+                return 1;
+            }
+
+            return 0;
+        }
+
+        if (updatedEntry.lastMinedEpochSecond() == VeinSavedData.ACTIVE_LAST_MINED && current.equals(oldTarget) && !current.equals(updatedEntry.targetState())) {
+            level.setBlock(pos, updatedEntry.targetState(), 3);
+            return 1;
+        }
+
+        return 0;
+    }
+
+    private static void processPendingRegenerationWorldUpdates(ServerLevel level) {
+        VeinSavedData savedData = VeinSavedData.get(level);
+        int budget = 128;
+        for (long packedPos : savedData.pendingCleanupPositions()) {
+            if (budget <= 0) {
+                return;
+            }
+
+            BlockPos pos = BlockPos.of(packedPos);
+            if (!level.hasChunkAt(pos)) {
+                continue;
+            }
+
+            budget--;
+            applyPendingCleanup(level, savedData, pos);
+        }
+
+        for (long packedPos : savedData.pendingPlacementPositions()) {
+            if (budget <= 0) {
+                return;
+            }
+
+            BlockPos pos = BlockPos.of(packedPos);
+            if (!level.hasChunkAt(pos)) {
+                continue;
+            }
+
+            budget--;
+            applyPendingPlacement(level, savedData, pos);
+        }
+    }
+
+    private static int applyPendingCleanup(ServerLevel level, VeinSavedData savedData, BlockPos pos) {
+        BlockState expectedState = savedData.pendingCleanupState(pos);
+        if (expectedState == null) {
+            savedData.clearCleanup(pos);
+            return 0;
+        }
+
+        try {
+            BlockState currentState = level.getBlockState(pos);
+            if (currentState.equals(expectedState) || currentState.is(ModContent.REGENERATOR_BLOCK.get())) {
+                level.setBlock(pos, Blocks.AIR.defaultBlockState(), 3);
+                savedData.clearCleanup(pos);
+                return 1;
+            }
+
+            savedData.clearCleanup(pos);
+            return 0;
+        } catch (RuntimeException exception) {
+            RegeneratingOreVeins.LOGGER.error("Failed to apply pending regenerated vein cleanup at {}", pos, exception);
+            return 0;
+        }
+    }
+
+    private static int applyPendingPlacement(ServerLevel level, VeinSavedData savedData, BlockPos pos) {
+        VeinSavedData.VeinEntry entry = savedData.getEntry(pos);
+        if (entry == null) {
+            savedData.clearPlacement(pos);
+            return 0;
+        }
+
+        try {
+            BlockState currentState = level.getBlockState(pos);
+            if (currentState.equals(entry.targetState())) {
+                savedData.clearPlacement(pos);
+                return 0;
+            }
+
+            if (currentState.is(ModContent.REGENERATOR_BLOCK.get())) {
+                level.setBlock(pos, entry.targetState(), 3);
+                savedData.clearPlacement(pos);
+                return 1;
+            }
+
+            if (currentState.isAir() || currentState.canBeReplaced() || canReplaceNatural(currentState) || isTrackedVeinTarget(currentState, entry)) {
+                level.setBlock(pos, entry.targetState(), 3);
+                savedData.clearPlacement(pos);
+                return 1;
+            }
+
+            savedData.removeEntry(pos);
+            savedData.clearPlacement(pos);
+            return 0;
+        } catch (RuntimeException exception) {
+            RegeneratingOreVeins.LOGGER.error("Failed to apply pending regenerated vein placement at {}", pos, exception);
+            return 0;
+        }
+    }
+
+    private static boolean isTrackedVeinTarget(BlockState state, VeinSavedData.VeinEntry entry) {
+        if (state.equals(entry.targetState())) {
+            return true;
+        }
+
+        VeinConfig.VeinDefinition vein = VeinConfig.getVein(entry.veinId()).orElse(null);
+        return vein != null && vein.containsBlock(state);
+    }
+
+    private static VeinConfig.VeinDefinition resolveVeinForExistingEntry(
+            VeinConfig.LoadedConfig config,
+            VeinConfig.VeinDefinition requestedVein,
+            VeinSavedData.VeinEntry entry
+    ) {
+        if (requestedVein != null) {
+            if (!entry.veinId().isBlank() && !requestedVein.id().equals(entry.veinId())) {
+                return null;
+            }
+
+            return requestedVein.containsBlock(entry.targetState()) || requestedVein.id().equals(entry.veinId()) ? requestedVein : null;
+        }
+
+        if (!entry.veinId().isBlank()) {
+            return config.veinsById().get(entry.veinId());
+        }
+
+        VeinConfig.VeinDefinition match = null;
+        for (VeinConfig.VeinDefinition vein : config.veinsById().values()) {
+            if (!vein.containsBlock(entry.targetState())) {
+                continue;
+            }
+
+            if (match != null) {
+                return null;
+            }
+
+            match = vein;
+        }
+
+        return match;
     }
 
     @SubscribeEvent
@@ -155,6 +634,7 @@ public final class VeinRuntime {
             }
 
             processPendingChunkGeneration(serverLevel);
+            processPendingRegenerationWorldUpdates(serverLevel);
             validateActiveEntries(serverLevel);
             processPendingRegeneratorReplacement(serverLevel);
         } catch (RuntimeException exception) {
@@ -247,7 +727,7 @@ public final class VeinRuntime {
                 continue;
             }
 
-            if (!forceReplace && vein.area() != null && !vein.area().contains(pos)) {
+            if (!forceReplace && !vein.allowsPosition(level.dimension(), pos)) {
                 continue;
             }
 
@@ -272,7 +752,8 @@ public final class VeinRuntime {
                             vein.regenerationIntervalSeconds(),
                             vein.regenerationIntervalJitter().rangeMin(),
                             vein.regenerationIntervalJitter().rangeMax(),
-                            VeinSavedData.ACTIVE_LAST_MINED
+                            VeinSavedData.ACTIVE_LAST_MINED,
+                            vein.id()
                     )
             );
             placed++;
@@ -306,11 +787,14 @@ public final class VeinRuntime {
         int min = Math.min(rangeMin, rangeMax);
         int max = Math.max(rangeMin, rangeMax);
         if (min == 0 && max == 0) {
-            return Math.max(1, intervalSeconds);
+            return Math.max(0, intervalSeconds);
         }
 
         RandomSource randomSource = random == null ? RandomSource.create() : random;
-        return Math.max(1, intervalSeconds + Mth.nextInt(randomSource, min, max));
+        long range = (long) max - (long) min + 1L;
+        long jitter = min + Math.floorMod(randomSource.nextLong(), range);
+        long jittered = (long) Math.max(0, intervalSeconds) + jitter;
+        return (int) Math.max(0L, Math.min(Integer.MAX_VALUE, jittered));
     }
 
     private static void processPendingChunkGeneration(ServerLevel level) {
@@ -368,6 +852,10 @@ public final class VeinRuntime {
 
             VeinSavedData.VeinEntry entry = savedData.getEntry(pos);
             if (entry == null || entry.lastMinedEpochSecond() != VeinSavedData.ACTIVE_LAST_MINED) {
+                continue;
+            }
+
+            if (savedData.isPendingPlacement(pos)) {
                 continue;
             }
 
@@ -442,7 +930,7 @@ public final class VeinRuntime {
                 int z = chunkPos.getMinBlockZ() + random.nextInt(16);
                 int y = Mth.nextInt(random, Math.min(vein.minY(), vein.maxY()), Math.max(vein.minY(), vein.maxY()));
                 BlockPos center = new BlockPos(x, y, z);
-                if (vein.area() != null && !vein.area().contains(center)) {
+                if (!vein.allowsPosition(level.dimension(), center)) {
                     continue;
                 }
 
@@ -553,5 +1041,26 @@ public final class VeinRuntime {
 
     private static long epochSeconds() {
         return TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis());
+    }
+
+    private record ExistingVeinUpdateResult(int scanned, int updated, int loadedTouched, int skippedNoConfig, int errors) {
+        private static final ExistingVeinUpdateResult ZERO = new ExistingVeinUpdateResult(0, 0, 0, 0, 0);
+
+        private ExistingVeinUpdateResult plus(ExistingVeinUpdateResult other) {
+            return new ExistingVeinUpdateResult(
+                    this.scanned + other.scanned,
+                    this.updated + other.updated,
+                    this.loadedTouched + other.loadedTouched,
+                    this.skippedNoConfig + other.skippedNoConfig,
+                    this.errors + other.errors
+            );
+        }
+    }
+
+    private record ExistingTrackedEntry(BlockPos pos, VeinSavedData.VeinEntry entry, VeinConfig.VeinDefinition vein) {
+    }
+
+    private record RegenerateGroupResult(int updated, int loadedTouched) {
+        private static final RegenerateGroupResult ZERO = new RegenerateGroupResult(0, 0);
     }
 }

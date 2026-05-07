@@ -1,6 +1,8 @@
 package net.stargazer.regenerating_ore_veins;
 
 import com.mojang.logging.LogUtils;
+import net.minecraft.client.renderer.entity.EntityRenderers;
+import net.minecraft.client.renderer.entity.ThrownItemRenderer;
 import net.minecraft.client.renderer.ItemBlockRenderTypes;
 import net.minecraft.client.renderer.RenderType;
 import net.neoforged.bus.api.IEventBus;
@@ -30,7 +32,10 @@ public final class RegeneratingOreVeins {
 
         @SubscribeEvent
         public static void onClientSetup(FMLClientSetupEvent event) {
-            event.enqueueWork(() -> ItemBlockRenderTypes.setRenderLayer(ModContent.REGENERATOR_BLOCK.get(), RenderType.translucent()));
+            event.enqueueWork(() -> {
+                ItemBlockRenderTypes.setRenderLayer(ModContent.REGENERATOR_BLOCK.get(), RenderType.translucent());
+                EntityRenderers.register(ModContent.VEIN_LOCATOR_SIGNAL.get(), ThrownItemRenderer::new);
+            });
         }
     }
 }

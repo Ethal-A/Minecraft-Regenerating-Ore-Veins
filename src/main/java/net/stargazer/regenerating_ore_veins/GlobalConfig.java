@@ -96,7 +96,7 @@ public final class GlobalConfig {
         return new Values(
                 getBoolean(object, "allow_breaking", true),
                 Math.max(0.0D, getDouble(object, "break_hardness", 5.0D)),
-                Math.max(1, getInt(object, "default_regeneration_seconds", DEFAULT_REGENERATION_SECONDS_VALUE)),
+                Math.max(0, getInt(object, "default_regeneration_seconds", DEFAULT_REGENERATION_SECONDS_VALUE)),
                 parseJitter(object.getAsJsonObject("default_jitter_interval")),
                 getBoolean(object, "regeneration_smoke_particles", true),
                 getBoolean(object, "destroyed_by_explosives", false),
@@ -142,7 +142,17 @@ public final class GlobalConfig {
     }
 
     private static int getInt(JsonObject object, String key, int fallback) {
-        return object.has(key) ? object.get(key).getAsInt() : fallback;
+        if (!object.has(key)) {
+            return fallback;
+        }
+
+        try {
+            long value = object.get(key).getAsLong();
+            return (int) Math.max(Integer.MIN_VALUE, Math.min(Integer.MAX_VALUE, value));
+        } catch (RuntimeException exception) {
+            RegeneratingOreVeins.LOGGER.warn("Invalid integer value for global config key '{}', using {}", key, fallback, exception);
+            return fallback;
+        }
     }
 
     public record Values(
