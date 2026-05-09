@@ -204,9 +204,9 @@ public final class VeinConfig {
                 Collections.unmodifiableList(biomes),
                 Collections.unmodifiableList(blockStates),
                 Collections.unmodifiableList(weights),
-                VeinShape.fromName(getString(object, "shape", "circle")),
-                Math.max(1, getInt(object, "min_size", 12)),
-                Math.max(1, getInt(object, "max_size", 20)),
+                VeinShape.fromName(getString(object, "shape", "sphere")),
+                Math.max(0, getInt(object, "min_radius", 2)),
+                Math.max(0, getInt(object, "max_radius", 3)),
                 Math.max(1, getInt(object, "attempts", 1)),
                 getInt(object, "min_y", -64),
                 getInt(object, "max_y", 320),
@@ -414,18 +414,18 @@ public final class VeinConfig {
 
     private static void writeDefaultVeins() throws IOException {
         JsonArray array = new JsonArray();
-        array.add(defaultVein("andesite", "minecraft:andesite", "minecraft:overworld", "box", 26, 42, 2, -16, 96, 8, 1800, -120, 120));
-        array.add(defaultVein("coal_ore", "minecraft:coal_ore", "minecraft:overworld", "circle", 20, 36, 2, 0, 192, 7, 2400, -180, 180));
-        array.add(defaultVein("iron_ore", "minecraft:iron_ore", "minecraft:overworld", "circle", 18, 32, 2, -24, 80, 7, 2700, -180, 180));
-        array.add(defaultVein("gold_ore", "minecraft:gold_ore", "minecraft:overworld", "circle", 12, 24, 1, -64, 32, 9, 3600, -240, 240));
-        array.add(defaultVein("budding_amethyst", "minecraft:budding_amethyst", "minecraft:overworld", "box", 4, 10, 1, -64, 30, 18, 7200, -600, 600));
-        array.add(defaultVein("diamond_ore", "minecraft:diamond_ore", "minecraft:overworld", "circle", 8, 18, 1, -64, 16, 10, 5400, -300, 300));
-        array.add(defaultVein("emerald_ore", "minecraft:emerald_ore", "minecraft:overworld", "circle", 4, 10, 1, -16, 320, 12, 5400, -300, 300));
-        array.add(defaultVein("lapis_lazuli_ore", "minecraft:lapis_ore", "minecraft:overworld", "circle", 10, 22, 1, -64, 64, 9, 3600, -240, 240));
-        array.add(defaultVein("redstone_ore", "minecraft:redstone_ore", "minecraft:overworld", "circle", 12, 26, 1, -64, 16, 8, 3600, -240, 240));
-        array.add(defaultVein("quartz_ore", "minecraft:quartz_block", "minecraft:overworld", "circle", 8, 18, 1, 0, 96, 12, 3600, -240, 240));
-        array.add(defaultVein("netherite_ore", "minecraft:ancient_debris", "minecraft:the_nether", "circle", 3, 8, 1, 8, 22, 18, 10800, -900, 900));
-        array.add(defaultVein("nether_quartz_ore", "minecraft:nether_quartz_ore", "minecraft:the_nether", "circle", 18, 34, 2, 10, 117, 7, 2700, -180, 180));
+        array.add(defaultVein("andesite", "minecraft:andesite", "minecraft:overworld", "box", 1, 2, 2, -16, 96, 8, 1800, -120, 120));
+        array.add(defaultVein("coal_ore", "minecraft:coal_ore", "minecraft:overworld", "sphere", 2, 3, 2, 0, 192, 7, 2400, -180, 180));
+        array.add(defaultVein("iron_ore", "minecraft:iron_ore", "minecraft:overworld", "sphere", 2, 3, 2, -24, 80, 7, 2700, -180, 180));
+        array.add(defaultVein("gold_ore", "minecraft:gold_ore", "minecraft:overworld", "sphere", 1, 2, 1, -64, 32, 9, 3600, -240, 240));
+        array.add(defaultVein("budding_amethyst", "minecraft:budding_amethyst", "minecraft:overworld", "box", 1, 1, 1, -64, 30, 18, 7200, -600, 600));
+        array.add(defaultVein("diamond_ore", "minecraft:diamond_ore", "minecraft:overworld", "sphere", 1, 2, 1, -64, 16, 10, 5400, -300, 300));
+        array.add(defaultVein("emerald_ore", "minecraft:emerald_ore", "minecraft:overworld", "sphere", 1, 1, 1, -16, 320, 12, 5400, -300, 300));
+        array.add(defaultVein("lapis_lazuli_ore", "minecraft:lapis_ore", "minecraft:overworld", "sphere", 1, 2, 1, -64, 64, 9, 3600, -240, 240));
+        array.add(defaultVein("redstone_ore", "minecraft:redstone_ore", "minecraft:overworld", "sphere", 1, 2, 1, -64, 16, 8, 3600, -240, 240));
+        array.add(defaultVein("quartz_ore", "minecraft:quartz_block", "minecraft:overworld", "sphere", 1, 2, 1, 0, 96, 12, 3600, -240, 240));
+        array.add(defaultVein("netherite_ore", "minecraft:ancient_debris", "minecraft:the_nether", "sphere", 1, 1, 1, 8, 22, 18, 10800, -900, 900));
+        array.add(defaultVein("nether_quartz_ore", "minecraft:nether_quartz_ore", "minecraft:the_nether", "sphere", 2, 3, 2, 10, 117, 7, 2700, -180, 180));
         array.add(defaultUnusualGoldVein());
 
         try (Writer writer = Files.newBufferedWriter(VEINS_PATH)) {
@@ -438,8 +438,8 @@ public final class VeinConfig {
             String block,
             String dimension,
             String shape,
-            int minSize,
-            int maxSize,
+            int minRadius,
+            int maxRadius,
             int attempts,
             int minY,
             int maxY,
@@ -455,8 +455,8 @@ public final class VeinConfig {
         vein.add("blocks", blocks);
         vein.addProperty("dimension", dimension);
         vein.addProperty("shape", shape);
-        vein.addProperty("min_size", minSize);
-        vein.addProperty("max_size", maxSize);
+        vein.addProperty("min_radius", minRadius);
+        vein.addProperty("max_radius", maxRadius);
         vein.addProperty("attempts", attempts);
         vein.addProperty("min_y", minY);
         vein.addProperty("max_y", maxY);
@@ -496,9 +496,9 @@ public final class VeinConfig {
         biomes.add("minecraft:nether_wastes");
         vein.add("biome", biomes);
 
-        vein.addProperty("shape", "circle");
-        vein.addProperty("min_size", 12);
-        vein.addProperty("max_size", 24);
+        vein.addProperty("shape", "sphere");
+        vein.addProperty("min_radius", 2);
+        vein.addProperty("max_radius", 3);
         vein.addProperty("fill_factor", 1.0D);
         vein.addProperty("attempts", 1);
         vein.addProperty("min_y", -64);
@@ -513,11 +513,19 @@ public final class VeinConfig {
     }
 
     public enum VeinShape {
-        CIRCLE,
+        SPHERE,
         BOX;
 
         public static VeinShape fromName(String name) {
-            return "box".equalsIgnoreCase(name) ? BOX : CIRCLE;
+            if ("box".equalsIgnoreCase(name)) {
+                return BOX;
+            }
+
+            if (!"sphere".equalsIgnoreCase(name)) {
+                RegeneratingOreVeins.LOGGER.warn("Unsupported vein shape '{}', defaulting to 'sphere'", name);
+            }
+
+            return SPHERE;
         }
     }
 
@@ -614,8 +622,8 @@ public final class VeinConfig {
             List<BlockState> blocks,
             List<Integer> weights,
             VeinShape shape,
-            int minSize,
-            int maxSize,
+            int minRadius,
+            int maxRadius,
             int attempts,
             int minY,
             int maxY,
@@ -690,9 +698,9 @@ public final class VeinConfig {
             return this.dimensions.isEmpty() ? Level.OVERWORLD : this.dimensions.getFirst();
         }
 
-        public int pickShapeSize(RandomSource random) {
-            int min = Math.min(this.minSize, this.maxSize);
-            int max = Math.max(this.minSize, this.maxSize);
+        public int pickRadius(RandomSource random) {
+            int min = Math.min(this.minRadius, this.maxRadius);
+            int max = Math.max(this.minRadius, this.maxRadius);
             return min == max ? min : Mth.nextInt(random, min, max);
         }
 
@@ -715,8 +723,7 @@ public final class VeinConfig {
         }
 
         public int estimatedRadius() {
-            int blockCount = Math.max(this.minSize, this.maxSize);
-            return Math.max(1, (int) Math.ceil(Math.cbrt(blockCount)) + 1);
+            return Math.max(1, Math.max(this.minRadius, this.maxRadius));
         }
 
         public ResourceLocation structureLocation() {

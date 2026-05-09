@@ -976,28 +976,22 @@ public final class VeinRuntime {
     }
 
     private static List<BlockPos> computeShapePositions(BlockPos center, VeinConfig.VeinDefinition vein, RandomSource random) {
-        int shapeSize = vein.pickShapeSize(random);
+        int radius = vein.pickRadius(random);
         List<BlockPos> positions = new ArrayList<>();
 
         if (vein.shape() == VeinConfig.VeinShape.BOX) {
-            int root = Math.max(1, (int) Math.round(Math.cbrt(shapeSize)));
-            int halfX = Math.max(1, Mth.ceil(root / 2.0D));
-            int halfY = Math.max(1, Mth.ceil(root / 3.0D));
-            int halfZ = Math.max(1, halfX);
-            for (int x = -halfX; x <= halfX; x++) {
-                for (int y = -halfY; y <= halfY; y++) {
-                    for (int z = -halfZ; z <= halfZ; z++) {
+            for (int x = -radius; x <= radius; x++) {
+                for (int y = -radius; y <= radius; y++) {
+                    for (int z = -radius; z <= radius; z++) {
                         positions.add(center.offset(x, y, z));
                     }
                 }
             }
         } else {
-            int radius = sphereRadiusForSize(shapeSize);
             for (int x = -radius; x <= radius; x++) {
                 for (int y = -radius; y <= radius; y++) {
                     for (int z = -radius; z <= radius; z++) {
-                        double distance = (x * x + y * y + z * z) / (double) (radius * radius);
-                        if (distance <= 1.0D) {
+                        if (x * x + y * y + z * z <= radius * radius) {
                             positions.add(center.offset(x, y, z));
                         }
                     }
@@ -1021,11 +1015,6 @@ public final class VeinRuntime {
         }
 
         return filled;
-    }
-
-    private static int sphereRadiusForSize(int shapeSize) {
-        double radius = Math.cbrt((3.0D * Math.max(1, shapeSize)) / (4.0D * Math.PI));
-        return Math.max(1, (int) Math.round(radius));
     }
 
     private static boolean canReplaceNatural(BlockState state) {

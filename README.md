@@ -143,9 +143,9 @@ The following example shows how you can configure a vein.
       "frontier_0"
     ],
     "area_blacklist": [],
-    "shape": "circle",
-    "min_size": 12,
-    "max_size": 24,
+    "shape": "sphere",
+    "min_radius": 2,
+    "max_radius": 3,
     "fill_factor": 1.0,
     "attempts": 1,
     "min_y": -64,
@@ -167,14 +167,26 @@ Supported/optional fields:
 - `dimension` accepts a string or list and defaults to `minecraft:overworld`. The vanilla Nether id is `minecraft:the_nether`, though `minecraft:nether` is accepted as an alias.
 - `biome` accepts a string or list. Entries can be exact biome ids such as `minecraft:plains` or tags prefixed with `#`, such as `#c:is_jungle`.
 - `weights` defaults to `1` for each block
-- `shape` supports `circle` and `box`
-- `min_size` and `max_size` choose a random shape scale for each vein. They are not a hard cap on placed blocks.
+- `shape` supports `sphere` and `box`
+- `min_radius` and `max_radius` choose a random radius in blocks for each vein. For `sphere`, this is the radius of a sphere-like vein. For `box`, this is the half-extent of a cube from the center.
 - `fill_factor` is a `0.0..1.0` probability applied to each candidate block in the vein shape. `0` places none of the selected positions, `1` places all selected positions. Defaults to `global.json` value `default_fill_factor`.
 - `chunk_minimum_generation_separation` defaults to `8`. Values `>= 1` space candidate chunks apart. Values below `1` multiply generation in each chunk, so `0.5` means two attempts per chunk and `0.25` means four.
 - `regeneration_interval_seconds` defaults to `global.json` value `default_regeneration_seconds`
 - `regeneration_interval_jitter` defaults to `global.json` value `default_jitter_interval`
 
 If whitelist and blacklist overlap, `area_blacklist` wins. `dimension` is still applied when area filters are present, so admins can combine dimension, area, biome, and Y-level limits. The default `veins.json` examples are not area-constrained and include Overworld and Nether examples. Vanilla Minecraft does not have separate Overworld quartz ore or netherite ore blocks, so the default examples use `minecraft:quartz_block` for the quartz example and `minecraft:ancient_debris` for netherite.
+
+Expected blocks generated with `fill_factor: 1.0`:
+
+| Radius | `sphere` |  `box` |
+| ---: | ---: |-------:|
+| 1 | 7 |     27 |
+| 2 | 33 |    125 |
+| 3 | 123 |    343 |
+| 6 | 925 |  2,197 |
+| 12 | 7,153 | 15,625 |
+
+With `fill_factor: 0.5`, you can expect the number of blocks to roughly half.
 
 ### `vein_locator.json`
 
@@ -254,7 +266,7 @@ This updates the mod's saved vein entries to the current configuration: interval
 
 The main safety rule is that the command only touches loaded world blocks when the block is still the exact old tracked target or the regenerator block entity is present. This avoids overwriting unrelated player edits. Old saved entries created before vein ids were stored can still be updated when the target block uniquely identifies the vein, or when an explicit `id` is provided and that vein contains the target block.
 
-Adding `regenerate` rebuilds already tracked vein groups using the current `shape`, `min_size`, `max_size`, and `fill_factor`. The command reconstructs groups from nearby tracked blocks with the same vein id, removes old tracked positions, creates new tracked positions around the group's center, and queues cleanup/placement work for unloaded chunks. It still avoids force-loading chunks. When those chunks load later, queued cleanup removes old generated ore/regenerator blocks only if they still look like the old tracked blocks, and queued placement writes new ore only into safe replaceable/natural blocks. If a player has built something else there, the queued placement is skipped and that new saved entry is removed instead of overwriting the build.
+Adding `regenerate` rebuilds already tracked vein groups using the current `shape`, `min_radius`, `max_radius`, and `fill_factor`. The command reconstructs groups from nearby tracked blocks with the same vein id, removes old tracked positions, creates new tracked positions around the group's center, and queues cleanup/placement work for unloaded chunks. It still avoids force-loading chunks. When those chunks load later, queued cleanup removes old generated ore/regenerator blocks only if they still look like the old tracked blocks, and queued placement writes new ore only into safe replaceable/natural blocks. If a player has built something else there, the queued placement is skipped and that new saved entry is removed instead of overwriting the build.
 
 ## Reloading Config
 
