@@ -23,6 +23,7 @@ public final class VeinLocatorConfig {
     private static final Path CONFIG_DIR = FMLPaths.CONFIGDIR.get().resolve(RegeneratingOreVeins.MOD_ID);
     private static final Path LOCATOR_PATH = CONFIG_DIR.resolve("vein_locator.json");
     private static volatile Values cached;
+    private static volatile VeinConfig.ConfigReport lastReport = VeinConfig.ConfigReport.empty();
 
     private VeinLocatorConfig() {
     }
@@ -32,15 +33,22 @@ public final class VeinLocatorConfig {
         return values == null ? loadFromDisk() : values;
     }
 
+    public static VeinConfig.ConfigReport lastReport() {
+        return lastReport;
+    }
+
     public static Values loadFromDisk() {
         ensureDefaultFile();
         try (Reader reader = Files.newBufferedReader(LOCATOR_PATH)) {
             JsonObject object = GSON.fromJson(reader, JsonObject.class);
             Values values = parse(object == null ? new JsonObject() : object);
             cached = values;
+            lastReport = VeinConfig.ConfigReport.empty();
             return values;
         } catch (IOException | JsonParseException exception) {
-            RegeneratingOreVeins.LOGGER.error("Failed to read {}", LOCATOR_PATH, exception);
+            String message = "Failed to read " + LOCATOR_PATH + ": " + exception.getMessage();
+            RegeneratingOreVeins.LOGGER.error(message, exception);
+            lastReport = new VeinConfig.ConfigReport(List.of(), List.of(message));
             Values fallback = Values.defaults();
             cached = fallback;
             return fallback;

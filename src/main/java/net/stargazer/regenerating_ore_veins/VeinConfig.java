@@ -44,6 +44,7 @@ public final class VeinConfig {
     private static final Path AREAS_PATH = CONFIG_DIR.resolve("areas.json");
     private static final Path VEINS_PATH = CONFIG_DIR.resolve("veins.json");
     private static volatile LoadedConfig cached = LoadedConfig.empty();
+    private static volatile ConfigReport lastReport = ConfigReport.empty();
 
     private VeinConfig() {
     }
@@ -52,11 +53,18 @@ public final class VeinConfig {
         return cached;
     }
 
+    public static ConfigReport lastReport() {
+        return lastReport;
+    }
+
     public static LoadedConfig loadFromDisk() {
         ensureDefaults();
-        Map<String, AreaDefinition> areas = readAreas();
-        Map<String, VeinDefinition> veins = readVeins(areas);
-        cached = new LoadedConfig(areas, veins);
+        Diagnostics diagnostics = new Diagnostics();
+        Map<String, AreaDefinition> areas = readAreas(diagnostics);
+        Map<String, VeinDefinition> veins = readVeins(areas, diagnostics);
+        ConfigReport report = diagnostics.toReport();
+        lastReport = report;
+        cached = new LoadedConfig(areas, veins, report);
         return cached;
     }
 
@@ -87,69 +95,82 @@ public final class VeinConfig {
         return Optional.ofNullable(loadFromDisk().veinsById().get(id));
     }
 
-    private static Map<String, AreaDefinition> readAreas() {
+    private static Map<String, AreaDefinition> readAreas(Diagnostics diagnostics) {
         try (Reader reader = Files.newBufferedReader(AREAS_PATH)) {
             JsonArray array = GSON.fromJson(reader, JsonArray.class);
             if (array == null) {
+                diagnostics.warn("areas.json is empty; no areas were loaded.");
                 return Map.of();
             }
 
             Map<String, AreaDefinition> result = new LinkedHashMap<>();
             for (JsonElement element : array) {
                 if (!element.isJsonObject()) {
+                    diagnostics.warn("areas.json contains a non-object entry; skipping it.");
                     continue;
                 }
 
-                AreaDefinition area = parseArea(element.getAsJsonObject());
-                if (area != null) {
-                    result.put(area.name(), area);
+                try {
+                    AreaDefinition area = parseArea(element.getAsJsonObject(), diagnostics);
+                    if (area != null) {
+                        result.put(area.name(), area);
+                    }
+                } catch (RuntimeException exception) {
+                    diagnostics.error("areas.json contains an area entry that could not be parsed: " + exception.getMessage(), exception);
                 }
             }
 
             return result;
         } catch (IOException | JsonParseException exception) {
-            RegeneratingOreVeins.LOGGER.error("Failed to read {}", AREAS_PATH, exception);
+            diagnostics.error("Failed to read " + AREAS_PATH + ": " + exception.getMessage(), exception);
             return Map.of();
         }
     }
 
-    private static Map<String, VeinDefinition> readVeins(Map<String, AreaDefinition> areas) {
+    private static Map<String, VeinDefinition> readVeins(Map<String, AreaDefinition> areas, Diagnostics diagnostics) {
         try (Reader reader = Files.newBufferedReader(VEINS_PATH)) {
             JsonArray array = GSON.fromJson(reader, JsonArray.class);
             if (array == null) {
+                diagnostics.warn("veins.json is empty; no veins were loaded.");
                 return Map.of();
             }
 
             Map<String, VeinDefinition> result = new LinkedHashMap<>();
             for (JsonElement element : array) {
                 if (!element.isJsonObject()) {
+                    diagnostics.warn("veins.json contains a non-object entry; skipping it.");
                     continue;
                 }
 
-                VeinDefinition vein = parseVein(element.getAsJsonObject(), areas);
-                if (vein != null) {
-                    result.put(vein.id(), vein);
+                try {
+                    VeinDefinition vein = parseVein(element.getAsJsonObject(), areas, diagnostics);
+                    if (vein != null) {
+                        result.put(vein.id(), vein);
+                    }
+                } catch (RuntimeException exception) {
+                    diagnostics.error("veins.json contains a vein entry that could not be parsed: " + exception.getMessage(), exception);
                 }
             }
 
             return result;
         } catch (IOException | JsonParseException exception) {
-            RegeneratingOreVeins.LOGGER.error("Failed to read {}", VEINS_PATH, exception);
+            diagnostics.error("Failed to read " + VEINS_PATH + ": " + exception.getMessage(), exception);
             return Map.of();
         }
     }
 
-    private static AreaDefinition parseArea(JsonObject object) {
+    private static AreaDefinition parseArea(JsonObject object, Diagnostics diagnostics) {
         String name = getString(object, "name", "");
         String type = getString(object, "type", "box");
-        ResourceKey<Level> dimension = parseDimension(getString(object, "dimension", "minecraft:overworld"));
+        ResourceKey<Level> dimension = parseDimension(getString(object, "dimension", "minecraft:overworld"), diagnostics, "area '" + name + "' dimension");
         if (name.isBlank()) {
+            diagnostics.warn("Skipping area with blank name.");
             return null;
         }
 
         AreaShape shape = AreaShape.fromName(type);
         if (shape == null) {
-            RegeneratingOreVeins.LOGGER.warn("Unsupported area type '{}' for '{}'", type, name);
+            diagnostics.warn("Unsupported area type '" + type + "' for area '" + name + "'. Supported types are box, sphere, and cylinder.");
             return null;
         }
 
@@ -166,37 +187,37 @@ public final class VeinConfig {
         );
     }
 
-    private static VeinDefinition parseVein(JsonObject object, Map<String, AreaDefinition> areas) {
+    private static VeinDefinition parseVein(JsonObject object, Map<String, AreaDefinition> areas, Diagnostics diagnostics) {
         String id = getString(object, "id", "");
         if (id.isBlank() || !VALID_ID.matcher(id).matches()) {
-            RegeneratingOreVeins.LOGGER.warn("Skipping vein with invalid id '{}'", id);
+            diagnostics.warn("Skipping vein with invalid id '" + id + "'.");
             return null;
         }
 
         List<BlockState> blockStates = new ArrayList<>();
         JsonArray blocks = object.getAsJsonArray("blocks");
         if (blocks == null || blocks.isEmpty()) {
-            RegeneratingOreVeins.LOGGER.warn("Skipping vein '{}' because it has no blocks", id);
+            diagnostics.warn("Skipping vein '" + id + "' because it has no blocks.");
             return null;
         }
 
         for (JsonElement element : blocks) {
-            BlockState state = parseBlockState(element.getAsString());
+            BlockState state = parseBlockState(element.getAsString(), diagnostics);
             if (state != null) {
                 blockStates.add(state);
             }
         }
 
         if (blockStates.isEmpty()) {
-            RegeneratingOreVeins.LOGGER.warn("Skipping vein '{}' because none of its blocks exist", id);
+            diagnostics.warn("Skipping vein '" + id + "' because none of its blocks exist.");
             return null;
         }
 
         List<Integer> weights = parseWeights(object.getAsJsonArray("weights"), blockStates.size());
-        List<AreaDefinition> areaWhitelist = parseAreaList(object.get("area_whitelist"), areas);
-        List<AreaDefinition> areaBlacklist = parseAreaList(object.get("area_blacklist"), areas);
-        List<ResourceKey<Level>> dimensions = parseDimensions(object.get("dimension"));
-        List<BiomeCriterion> biomes = parseBiomes(object.get("biome"));
+        List<AreaDefinition> areaWhitelist = parseAreaList(object.get("area_whitelist"), areas, diagnostics);
+        List<AreaDefinition> areaBlacklist = parseAreaList(object.get("area_blacklist"), areas, diagnostics);
+        List<ResourceKey<Level>> dimensions = parseDimensions(object.get("dimension"), diagnostics);
+        List<BiomeCriterion> biomes = parseBiomes(object.get("biome"), diagnostics);
 
         return new VeinDefinition(
                 id,
@@ -204,7 +225,7 @@ public final class VeinConfig {
                 Collections.unmodifiableList(biomes),
                 Collections.unmodifiableList(blockStates),
                 Collections.unmodifiableList(weights),
-                VeinShape.fromName(getString(object, "shape", "sphere")),
+                VeinShape.fromName(getString(object, "shape", "sphere"), diagnostics),
                 Math.max(0, getInt(object, "min_radius", 2)),
                 Math.max(0, getInt(object, "max_radius", 3)),
                 Math.max(1, getInt(object, "attempts", 1)),
@@ -219,7 +240,7 @@ public final class VeinConfig {
         );
     }
 
-    private static List<AreaDefinition> parseAreaList(JsonElement element, Map<String, AreaDefinition> areas) {
+    private static List<AreaDefinition> parseAreaList(JsonElement element, Map<String, AreaDefinition> areas, Diagnostics diagnostics) {
         if (element == null || element.isJsonNull()) {
             return List.of();
         }
@@ -228,24 +249,24 @@ public final class VeinConfig {
         if (element.isJsonArray()) {
             for (JsonElement entry : element.getAsJsonArray()) {
                 if (entry.isJsonPrimitive()) {
-                    addArea(entry.getAsString(), areas, result);
+                    addArea(entry.getAsString(), areas, result, diagnostics);
                 }
             }
         } else if (element.isJsonPrimitive()) {
-            addArea(element.getAsString(), areas, result);
+            addArea(element.getAsString(), areas, result, diagnostics);
         }
 
         return result;
     }
 
-    private static void addArea(String areaName, Map<String, AreaDefinition> areas, List<AreaDefinition> result) {
+    private static void addArea(String areaName, Map<String, AreaDefinition> areas, List<AreaDefinition> result, Diagnostics diagnostics) {
         if (areaName.isBlank()) {
             return;
         }
 
         AreaDefinition area = areas.get(areaName);
         if (area == null) {
-            RegeneratingOreVeins.LOGGER.warn("Unknown area '{}'", areaName);
+            diagnostics.warn("Unknown area '" + areaName + "'.");
             return;
         }
 
@@ -283,23 +304,27 @@ public final class VeinConfig {
         return weights;
     }
 
-    private static BlockState parseBlockState(String id) {
+    private static BlockState parseBlockState(String id, Diagnostics diagnostics) {
         try {
             ResourceLocation location = ResourceLocation.parse(id);
             if (!BuiltInRegistries.BLOCK.containsKey(location)) {
-                RegeneratingOreVeins.LOGGER.warn("Unknown block '{}'", id);
+                diagnostics.warn("Unknown block '" + id + "'.");
                 return null;
             }
 
             Block block = BuiltInRegistries.BLOCK.get(location);
             return block.defaultBlockState();
         } catch (RuntimeException exception) {
-            RegeneratingOreVeins.LOGGER.warn("Invalid block id '{}'", id, exception);
+            diagnostics.warn("Invalid block id '" + id + "': " + exception.getMessage(), exception);
             return null;
         }
     }
 
     private static ResourceKey<Level> parseDimension(String id) {
+        return parseDimension(id, null, "dimension");
+    }
+
+    private static ResourceKey<Level> parseDimension(String id, Diagnostics diagnostics, String context) {
         try {
             ResourceLocation location = ResourceLocation.parse(id);
             if (ResourceLocation.fromNamespaceAndPath("minecraft", "nether").equals(location)) {
@@ -312,12 +337,16 @@ public final class VeinConfig {
 
             return ResourceKey.create(Registries.DIMENSION, location);
         } catch (RuntimeException exception) {
-            RegeneratingOreVeins.LOGGER.warn("Invalid dimension '{}', defaulting to minecraft:overworld", id, exception);
+            if (diagnostics != null) {
+                diagnostics.warn("Invalid " + context + " '" + id + "', defaulting to minecraft:overworld: " + exception.getMessage(), exception);
+            } else {
+                RegeneratingOreVeins.LOGGER.warn("Invalid dimension '{}', defaulting to minecraft:overworld", id, exception);
+            }
             return Level.OVERWORLD;
         }
     }
 
-    private static List<ResourceKey<Level>> parseDimensions(JsonElement element) {
+    private static List<ResourceKey<Level>> parseDimensions(JsonElement element, Diagnostics diagnostics) {
         if (element == null || element.isJsonNull()) {
             return List.of(Level.OVERWORLD);
         }
@@ -326,17 +355,17 @@ public final class VeinConfig {
         if (element.isJsonArray()) {
             for (JsonElement entry : element.getAsJsonArray()) {
                 if (entry.isJsonPrimitive()) {
-                    dimensions.add(parseDimension(entry.getAsString()));
+                    dimensions.add(parseDimension(entry.getAsString(), diagnostics, "vein dimension"));
                 }
             }
         } else if (element.isJsonPrimitive()) {
-            dimensions.add(parseDimension(element.getAsString()));
+            dimensions.add(parseDimension(element.getAsString(), diagnostics, "vein dimension"));
         }
 
         return dimensions.isEmpty() ? List.of(Level.OVERWORLD) : new ArrayList<>(dimensions);
     }
 
-    private static List<BiomeCriterion> parseBiomes(JsonElement element) {
+    private static List<BiomeCriterion> parseBiomes(JsonElement element, Diagnostics diagnostics) {
         if (element == null || element.isJsonNull()) {
             return List.of();
         }
@@ -345,17 +374,17 @@ public final class VeinConfig {
         if (element.isJsonArray()) {
             for (JsonElement entry : element.getAsJsonArray()) {
                 if (entry.isJsonPrimitive()) {
-                    parseBiome(entry.getAsString()).ifPresent(biomes::add);
+                    parseBiome(entry.getAsString(), diagnostics).ifPresent(biomes::add);
                 }
             }
         } else if (element.isJsonPrimitive()) {
-            parseBiome(element.getAsString()).ifPresent(biomes::add);
+            parseBiome(element.getAsString(), diagnostics).ifPresent(biomes::add);
         }
 
         return biomes;
     }
 
-    private static Optional<BiomeCriterion> parseBiome(String id) {
+    private static Optional<BiomeCriterion> parseBiome(String id, Diagnostics diagnostics) {
         try {
             if (id.startsWith("#")) {
                 return Optional.of(BiomeCriterion.tag(TagKey.create(Registries.BIOME, ResourceLocation.parse(id.substring(1)))));
@@ -363,7 +392,7 @@ public final class VeinConfig {
 
             return Optional.of(BiomeCriterion.biome(ResourceKey.create(Registries.BIOME, ResourceLocation.parse(id))));
         } catch (RuntimeException exception) {
-            RegeneratingOreVeins.LOGGER.warn("Invalid biome selector '{}'", id, exception);
+            diagnostics.warn("Invalid biome selector '" + id + "': " + exception.getMessage(), exception);
             return Optional.empty();
         }
     }
@@ -516,22 +545,81 @@ public final class VeinConfig {
         SPHERE,
         BOX;
 
-        public static VeinShape fromName(String name) {
+        private static VeinShape fromName(String name, Diagnostics diagnostics) {
             if ("box".equalsIgnoreCase(name)) {
                 return BOX;
             }
 
             if (!"sphere".equalsIgnoreCase(name)) {
-                RegeneratingOreVeins.LOGGER.warn("Unsupported vein shape '{}', defaulting to 'sphere'", name);
+                diagnostics.warn("Unsupported vein shape '" + name + "', defaulting to 'sphere'. Supported vein shapes are sphere and box.");
             }
 
             return SPHERE;
         }
     }
 
-    public record LoadedConfig(Map<String, AreaDefinition> areasByName, Map<String, VeinDefinition> veinsById) {
+    public record ConfigReport(List<String> warnings, List<String> errors) {
+        public static ConfigReport empty() {
+            return new ConfigReport(List.of(), List.of());
+        }
+
+        public boolean hasIssues() {
+            return !this.warnings.isEmpty() || !this.errors.isEmpty();
+        }
+
+        public String summary() {
+            return this.errors.size() + " errors, " + this.warnings.size() + " warnings";
+        }
+
+        public List<String> firstIssues(int limit) {
+            List<String> issues = new ArrayList<>(Math.min(limit, this.errors.size() + this.warnings.size()));
+            for (String error : this.errors) {
+                if (issues.size() >= limit) {
+                    return issues;
+                }
+
+                issues.add("ERROR: " + error);
+            }
+
+            for (String warning : this.warnings) {
+                if (issues.size() >= limit) {
+                    return issues;
+                }
+
+                issues.add("WARN: " + warning);
+            }
+
+            return issues;
+        }
+    }
+
+    private static final class Diagnostics {
+        private final List<String> warnings = new ArrayList<>();
+        private final List<String> errors = new ArrayList<>();
+
+        private void warn(String message) {
+            this.warnings.add(message);
+            RegeneratingOreVeins.LOGGER.warn(message);
+        }
+
+        private void warn(String message, Throwable throwable) {
+            this.warnings.add(message);
+            RegeneratingOreVeins.LOGGER.warn(message, throwable);
+        }
+
+        private void error(String message, Throwable throwable) {
+            this.errors.add(message);
+            RegeneratingOreVeins.LOGGER.error(message, throwable);
+        }
+
+        private ConfigReport toReport() {
+            return new ConfigReport(List.copyOf(this.warnings), List.copyOf(this.errors));
+        }
+    }
+
+    public record LoadedConfig(Map<String, AreaDefinition> areasByName, Map<String, VeinDefinition> veinsById, ConfigReport report) {
         public static LoadedConfig empty() {
-            return new LoadedConfig(Map.of(), Map.of());
+            return new LoadedConfig(Map.of(), Map.of(), ConfigReport.empty());
         }
     }
 
@@ -551,38 +639,39 @@ public final class VeinConfig {
                 return false;
             }
 
-            int halfX = this.dimX / 2;
-            int halfY = this.dimY / 2;
-            int halfZ = this.dimZ / 2;
-            boolean insideBounds = pos.getX() >= this.x - halfX
-                    && pos.getX() <= this.x + halfX
-                    && pos.getY() >= this.y - halfY
-                    && pos.getY() <= this.y + halfY
-                    && pos.getZ() >= this.z - halfZ
-                    && pos.getZ() <= this.z + halfZ;
-            if (!insideBounds || this.shape == AreaShape.BOX) {
-                return insideBounds;
-            }
+            int dx = Math.abs(pos.getX() - this.x);
+            int dy = Math.abs(pos.getY() - this.y);
+            int dz = Math.abs(pos.getZ() - this.z);
+            return switch (this.shape) {
+                case BOX -> dx <= this.dimX && dy <= this.dimY && dz <= this.dimZ;
+                case SPHERE -> normalizedSquared(dx, this.dimX) + normalizedSquared(dy, this.dimY) + normalizedSquared(dz, this.dimZ) <= 1.0D;
+                case CYLINDER -> normalizedSquared(dx, this.dimX) + normalizedSquared(dz, this.dimZ) <= 1.0D && dy <= this.dimY;
+            };
+        }
 
-            double radiusX = Math.max(0.5D, this.dimX / 2.0D);
-            double radiusZ = Math.max(0.5D, this.dimZ / 2.0D);
-            double dx = (pos.getX() - this.x) / radiusX;
-            double dz = (pos.getZ() - this.z) / radiusZ;
-            return dx * dx + dz * dz <= 1.0D;
+        private static double normalizedSquared(int distance, int radius) {
+            double safeRadius = Math.max(1.0D, radius);
+            double normalized = distance / safeRadius;
+            return normalized * normalized;
         }
     }
 
     public enum AreaShape {
         BOX,
-        CIRCLE;
+        SPHERE,
+        CYLINDER;
 
         public static AreaShape fromName(String name) {
             if ("box".equalsIgnoreCase(name)) {
                 return BOX;
             }
 
-            if ("circle".equalsIgnoreCase(name)) {
-                return CIRCLE;
+            if ("sphere".equalsIgnoreCase(name)) {
+                return SPHERE;
+            }
+
+            if ("cylinder".equalsIgnoreCase(name)) {
+                return CYLINDER;
             }
 
             return null;

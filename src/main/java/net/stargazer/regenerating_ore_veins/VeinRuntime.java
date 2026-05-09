@@ -19,6 +19,7 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Mth;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.entity.player.Player;
@@ -36,6 +37,7 @@ import net.neoforged.neoforge.event.level.BlockEvent;
 import net.neoforged.neoforge.event.level.ChunkEvent;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
+import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.tick.LevelTickEvent;
 
 @EventBusSubscriber(modid = RegeneratingOreVeins.MOD_ID)
@@ -129,7 +131,60 @@ public final class VeinRuntime {
                 () -> Component.literal("Reloaded Regenerating Ore Veins config: " + config.veinsById().size() + " veins, " + config.areasByName().size() + " areas."),
                 true
         );
+        sendConfigReport(context.getSource(), List.of(GlobalConfig.lastReport(), VeinLocatorConfig.lastReport(), config.report()));
         return config.veinsById().size();
+    }
+
+    @SubscribeEvent
+    public static void onPlayerLoggedIn(PlayerEvent.PlayerLoggedInEvent event) {
+        if (event.getEntity() instanceof ServerPlayer player) {
+            GlobalConfig.loadFromDisk();
+            VeinLocatorConfig.loadFromDisk();
+            VeinConfig.LoadedConfig config = VeinConfig.loadFromDisk();
+            sendConfigReport(player, List.of(GlobalConfig.lastReport(), VeinLocatorConfig.lastReport(), config.report()));
+        }
+    }
+
+    private static void sendConfigReport(CommandSourceStack source, List<VeinConfig.ConfigReport> reports) {
+        int errors = reports.stream().mapToInt(report -> report.errors().size()).sum();
+        int warnings = reports.stream().mapToInt(report -> report.warnings().size()).sum();
+        if (errors == 0 && warnings == 0) {
+            source.sendSuccess(() -> Component.literal("Regenerating Ore Veins config has no warnings or errors."), false);
+            return;
+        }
+
+        source.sendFailure(Component.literal("Regenerating Ore Veins config has " + errors + " errors, " + warnings + " warnings. Check latest.log for full details."));
+        for (String issue : firstIssues(reports, 5)) {
+            source.sendFailure(Component.literal(" - " + issue));
+        }
+    }
+
+    private static void sendConfigReport(ServerPlayer player, List<VeinConfig.ConfigReport> reports) {
+        int errors = reports.stream().mapToInt(report -> report.errors().size()).sum();
+        int warnings = reports.stream().mapToInt(report -> report.warnings().size()).sum();
+        if (errors == 0 && warnings == 0) {
+            return;
+        }
+
+        player.sendSystemMessage(Component.literal("Regenerating Ore Veins config has " + errors + " errors, " + warnings + " warnings. Check latest.log for full details."));
+        for (String issue : firstIssues(reports, 3)) {
+            player.sendSystemMessage(Component.literal(" - " + issue));
+        }
+    }
+
+    private static List<String> firstIssues(List<VeinConfig.ConfigReport> reports, int limit) {
+        List<String> issues = new ArrayList<>(limit);
+        for (VeinConfig.ConfigReport report : reports) {
+            for (String issue : report.firstIssues(limit)) {
+                if (issues.size() >= limit) {
+                    return issues;
+                }
+
+                issues.add(issue);
+            }
+        }
+
+        return issues;
     }
 
     private static int placeCommand(CommandContext<CommandSourceStack> context) {

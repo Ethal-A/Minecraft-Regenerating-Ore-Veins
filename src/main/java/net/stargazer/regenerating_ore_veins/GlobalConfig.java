@@ -10,6 +10,7 @@ import java.io.Reader;
 import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import net.neoforged.fml.loading.FMLPaths;
 
@@ -20,6 +21,7 @@ public final class GlobalConfig {
     private static final Path CONFIG_DIR = FMLPaths.CONFIGDIR.get().resolve(RegeneratingOreVeins.MOD_ID);
     private static final Path GLOBAL_PATH = CONFIG_DIR.resolve("global.json");
     private static volatile Values cached;
+    private static volatile VeinConfig.ConfigReport lastReport = VeinConfig.ConfigReport.empty();
 
     private GlobalConfig() {
     }
@@ -33,15 +35,22 @@ public final class GlobalConfig {
         return values;
     }
 
+    public static VeinConfig.ConfigReport lastReport() {
+        return lastReport;
+    }
+
     public static Values loadFromDisk() {
         ensureDefaultFile();
         try (Reader reader = Files.newBufferedReader(GLOBAL_PATH)) {
             JsonObject object = GSON.fromJson(reader, JsonObject.class);
             Values values = parse(object == null ? new JsonObject() : object);
             cached = values;
+            lastReport = VeinConfig.ConfigReport.empty();
             return values;
         } catch (IOException | JsonParseException exception) {
-            RegeneratingOreVeins.LOGGER.error("Failed to read {}", GLOBAL_PATH, exception);
+            String message = "Failed to read " + GLOBAL_PATH + ": " + exception.getMessage();
+            RegeneratingOreVeins.LOGGER.error(message, exception);
+            lastReport = new VeinConfig.ConfigReport(List.of(), List.of(message));
             Values fallback = Values.defaults();
             cached = fallback;
             return fallback;

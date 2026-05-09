@@ -108,10 +108,13 @@ The following example shows how you can create an area (note this is heavily ins
 ]
 ```
 
-`type` supports:
+`type` supports In Control!-style area shapes:
 
-- `box`: rectangular prism using `dimx`, `dimy`, and `dimz`
-- `circle`: horizontal ellipse/cylinder using `dimx` and `dimz` as diameters, plus `dimy` as the vertical height
+- `box`: rectangular prism. `dimx`, `dimy`, and `dimz` are half-extents from the center.
+- `sphere`: ellipsoid. `dimx`, `dimy`, and `dimz` are the X/Y/Z radii from the center.
+- `cylinder`: vertical elliptical cylinder. `dimx` and `dimz` are horizontal radii, and `dimy` is vertical half-height.
+
+`circle` is not supported. Area dimensions follow In Control! semantics and are radius/half-size values, not full dimensions. For example, a `box` centered at `x: 0, y: 128, z: 0` with `dimx: 8192, dimy: 512, dimz: 8192` covers roughly `x=-8192..8192`, `y=-384..640`, and `z=-8192..8192`.
 
 ### `veins.json`
 The following example shows how you can configure a vein.
@@ -283,11 +286,13 @@ Reload the mod's JSON config without restarting the server:
 /regenerating_ore_veins reload
 ```
 
-This reloads `global.json`, `areas.json`, `veins.json`, and `vein_locator.json` for runtime generation, `/rov place`, `/rov update_existing`, locator use, locator durability, and locator stack size. Vanilla `/place structure regenerating_ore_veins:<id>` and generated crafting recipes use datapack resources, so adding or removing vein ids or changing recipes may still require Minecraft's `/reload` or a world restart for those resources to refresh.
+This reloads `global.json`, `areas.json`, `veins.json`, and `vein_locator.json` for runtime generation, `/rov place`, `/rov update_existing`, locator use, locator durability, and locator stack size. If these files have syntax errors, or if `areas.json`/`veins.json` has unsupported values such as `type: "circle"` in an area, the problem is logged to `latest.log` and the command sender is told that the config has warnings or errors. Players are also warned when they join the world if config issues were found.
+
+Vanilla `/place structure regenerating_ore_veins:<id>` and generated crafting recipes use datapack resources, so adding or removing vein ids or changing recipes may still require Minecraft's `/reload` or a world restart for those resources to refresh.
 
 Note that this reload will not change the crafting recipe immediately, and you will need to restart the world (save and quit then open the world again) for the recipe changes to take effect.
 
-Natural generation does respect `area_whitelist` and `area_blacklist`. The default `frontier_0` example is centered at `x=0, z=0` and is `8192` blocks wide/deep, so it covers roughly `x=-4096..4096` and `z=-4096..4096`.
+Natural generation does respect `area_whitelist` and `area_blacklist`. The default `frontier_0` example is centered at `x=0, z=0` with `dimx: 8192` and `dimz: 8192`, so it covers roughly `x=-8192..8192` and `z=-8192..8192`.
 
 ## Notes
 
