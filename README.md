@@ -183,7 +183,13 @@ Expected blocks generated with `fill_factor: 1.0`:
 | 1 | 7 |     27 |
 | 2 | 33 |    125 |
 | 3 | 123 |    343 |
+| 4 | 257 |    729 |
+| 5 | 515 |  1,331 |
 | 6 | 925 |  2,197 |
+| 7 | 1,419 |  3,375 |
+| 8 | 2,109 |  4,913 |
+| 9 | 3,071 |  6,859 |
+| 10 | 4,169 |  9,261 |
 | 12 | 7,153 | 15,625 |
 
 With `fill_factor: 0.5`, you can expect the number of blocks to roughly half.
