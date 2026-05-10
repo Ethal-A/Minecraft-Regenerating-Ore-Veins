@@ -16,6 +16,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -213,16 +214,22 @@ public final class VeinConfig {
             return null;
         }
 
+        warnRemovedVeinFilterFields(object, id, diagnostics);
+
         List<Integer> weights = parseWeights(object.getAsJsonArray("weights"), blockStates.size());
         List<AreaDefinition> areaWhitelist = parseAreaList(object.get("area_whitelist"), areas, diagnostics);
         List<AreaDefinition> areaBlacklist = parseAreaList(object.get("area_blacklist"), areas, diagnostics);
-        List<ResourceKey<Level>> dimensions = parseDimensions(object.get("dimension"), diagnostics);
-        List<BiomeCriterion> biomes = parseBiomes(object.get("biome"), diagnostics);
+        List<ResourceCriterion> dimensionWhitelist = parseResourceCriteria(object.get("dimension_whitelist"), diagnostics, "vein '" + id + "' dimension_whitelist");
+        List<ResourceCriterion> dimensionBlacklist = parseResourceCriteria(object.get("dimension_blacklist"), diagnostics, "vein '" + id + "' dimension_blacklist");
+        List<BiomeCriterion> biomeWhitelist = parseBiomes(object.get("biome_whitelist"), diagnostics, "vein '" + id + "' biome_whitelist");
+        List<BiomeCriterion> biomeBlacklist = parseBiomes(object.get("biome_blacklist"), diagnostics, "vein '" + id + "' biome_blacklist");
 
         return new VeinDefinition(
                 id,
-                Collections.unmodifiableList(dimensions),
-                Collections.unmodifiableList(biomes),
+                Collections.unmodifiableList(dimensionWhitelist),
+                Collections.unmodifiableList(dimensionBlacklist),
+                Collections.unmodifiableList(biomeWhitelist),
+                Collections.unmodifiableList(biomeBlacklist),
                 Collections.unmodifiableList(blockStates),
                 Collections.unmodifiableList(weights),
                 VeinShape.fromName(getString(object, "shape", "sphere"), diagnostics),
@@ -238,6 +245,20 @@ public final class VeinConfig {
                 Collections.unmodifiableList(areaWhitelist),
                 Collections.unmodifiableList(areaBlacklist)
         );
+    }
+
+    private static void warnRemovedVeinFilterFields(JsonObject object, String id, Diagnostics diagnostics) {
+        if (object.has("area")) {
+            diagnostics.warn("Vein '" + id + "' uses removed field 'area'. Use 'area_whitelist' and/or 'area_blacklist'.");
+        }
+
+        if (object.has("dimension")) {
+            diagnostics.warn("Vein '" + id + "' uses removed field 'dimension'. Use 'dimension_whitelist' and/or 'dimension_blacklist'.");
+        }
+
+        if (object.has("biome")) {
+            diagnostics.warn("Vein '" + id + "' uses removed field 'biome'. Use 'biome_whitelist' and/or 'biome_blacklist'.");
+        }
     }
 
     private static List<AreaDefinition> parseAreaList(JsonElement element, Map<String, AreaDefinition> areas, Diagnostics diagnostics) {
@@ -346,26 +367,32 @@ public final class VeinConfig {
         }
     }
 
-    private static List<ResourceKey<Level>> parseDimensions(JsonElement element, Diagnostics diagnostics) {
+    private static List<ResourceCriterion> parseResourceCriteria(JsonElement element, Diagnostics diagnostics, String context) {
         if (element == null || element.isJsonNull()) {
-            return List.of(Level.OVERWORLD);
+            return List.of();
         }
 
-        Set<ResourceKey<Level>> dimensions = new LinkedHashSet<>();
+        List<ResourceCriterion> criteria = new ArrayList<>();
         if (element.isJsonArray()) {
             for (JsonElement entry : element.getAsJsonArray()) {
                 if (entry.isJsonPrimitive()) {
-                    dimensions.add(parseDimension(entry.getAsString(), diagnostics, "vein dimension"));
+                    ResourceCriterion criterion = parseResourceCriterion(entry.getAsString(), diagnostics, context);
+                    if (criterion != null) {
+                        criteria.add(criterion);
+                    }
                 }
             }
         } else if (element.isJsonPrimitive()) {
-            dimensions.add(parseDimension(element.getAsString(), diagnostics, "vein dimension"));
+            ResourceCriterion criterion = parseResourceCriterion(element.getAsString(), diagnostics, context);
+            if (criterion != null) {
+                criteria.add(criterion);
+            }
         }
 
-        return dimensions.isEmpty() ? List.of(Level.OVERWORLD) : new ArrayList<>(dimensions);
+        return criteria;
     }
 
-    private static List<BiomeCriterion> parseBiomes(JsonElement element, Diagnostics diagnostics) {
+    private static List<BiomeCriterion> parseBiomes(JsonElement element, Diagnostics diagnostics, String context) {
         if (element == null || element.isJsonNull()) {
             return List.of();
         }
@@ -374,26 +401,56 @@ public final class VeinConfig {
         if (element.isJsonArray()) {
             for (JsonElement entry : element.getAsJsonArray()) {
                 if (entry.isJsonPrimitive()) {
-                    parseBiome(entry.getAsString(), diagnostics).ifPresent(biomes::add);
+                    parseBiome(entry.getAsString(), diagnostics, context).ifPresent(biomes::add);
                 }
             }
         } else if (element.isJsonPrimitive()) {
-            parseBiome(element.getAsString(), diagnostics).ifPresent(biomes::add);
+            parseBiome(element.getAsString(), diagnostics, context).ifPresent(biomes::add);
         }
 
         return biomes;
     }
 
-    private static Optional<BiomeCriterion> parseBiome(String id, Diagnostics diagnostics) {
+    private static Optional<BiomeCriterion> parseBiome(String id, Diagnostics diagnostics, String context) {
         try {
             if (id.startsWith("#")) {
-                return Optional.of(BiomeCriterion.tag(TagKey.create(Registries.BIOME, ResourceLocation.parse(id.substring(1)))));
+                ResourceLocation location = parseLocation(id.substring(1), diagnostics, context);
+                return location == null ? Optional.empty() : Optional.of(BiomeCriterion.tag(TagKey.create(Registries.BIOME, location)));
             }
 
-            return Optional.of(BiomeCriterion.biome(ResourceKey.create(Registries.BIOME, ResourceLocation.parse(id))));
+            if (isNamespaceWildcard(id)) {
+                ResourceLocation namespaceMarker = parseLocation(id.substring(0, id.length() - 2) + ":marker", diagnostics, context);
+                return namespaceMarker == null ? Optional.empty() : Optional.of(BiomeCriterion.namespace(namespaceMarker.getNamespace()));
+            }
+
+            ResourceLocation location = parseLocation(id, diagnostics, context);
+            return location == null ? Optional.empty() : Optional.of(BiomeCriterion.biome(ResourceKey.create(Registries.BIOME, location)));
         } catch (RuntimeException exception) {
             diagnostics.warn("Invalid biome selector '" + id + "': " + exception.getMessage(), exception);
             return Optional.empty();
+        }
+    }
+
+    private static ResourceCriterion parseResourceCriterion(String id, Diagnostics diagnostics, String context) {
+        if (isNamespaceWildcard(id)) {
+            ResourceLocation namespaceMarker = parseLocation(id.substring(0, id.length() - 2) + ":marker", diagnostics, context);
+            return namespaceMarker == null ? null : ResourceCriterion.namespace(namespaceMarker.getNamespace());
+        }
+
+        ResourceLocation location = parseLocation("minecraft:nether".equals(id) ? "minecraft:the_nether" : id, diagnostics, context);
+        return location == null ? null : ResourceCriterion.exact(location);
+    }
+
+    private static boolean isNamespaceWildcard(String value) {
+        return value.endsWith(":*") && value.length() > 2;
+    }
+
+    private static ResourceLocation parseLocation(String id, Diagnostics diagnostics, String context) {
+        try {
+            return ResourceLocation.parse(id.toLowerCase(Locale.ROOT));
+        } catch (RuntimeException exception) {
+            diagnostics.warn(context + " has invalid resource location '" + id + "': " + exception.getMessage(), exception);
+            return null;
         }
     }
 
@@ -482,7 +539,9 @@ public final class VeinConfig {
         JsonArray blocks = new JsonArray();
         blocks.add(block);
         vein.add("blocks", blocks);
-        vein.addProperty("dimension", dimension);
+        JsonArray dimensions = new JsonArray();
+        dimensions.add(dimension);
+        vein.add("dimension_whitelist", dimensions);
         vein.addProperty("shape", shape);
         vein.addProperty("min_radius", minRadius);
         vein.addProperty("max_radius", maxRadius);
@@ -517,13 +576,13 @@ public final class VeinConfig {
         JsonArray dimensions = new JsonArray();
         dimensions.add("minecraft:overworld");
         dimensions.add("minecraft:the_nether");
-        vein.add("dimension", dimensions);
+        vein.add("dimension_whitelist", dimensions);
 
         JsonArray biomes = new JsonArray();
         biomes.add("minecraft:badlands");
         biomes.add("#c:is_jungle");
         biomes.add("minecraft:nether_wastes");
-        vein.add("biome", biomes);
+        vein.add("biome_whitelist", biomes);
 
         vein.addProperty("shape", "sphere");
         vein.addProperty("min_radius", 2);
@@ -682,17 +741,53 @@ public final class VeinConfig {
         public static final RegenerationIntervalJitter NONE = new RegenerationIntervalJitter(0, 0);
     }
 
-    public record BiomeCriterion(ResourceKey<Biome> biome, TagKey<Biome> tag) {
+    public record ResourceCriterion(ResourceLocation exact, String namespace) {
+        public static ResourceCriterion exact(ResourceLocation exact) {
+            return new ResourceCriterion(Objects.requireNonNull(exact, "exact"), null);
+        }
+
+        public static ResourceCriterion namespace(String namespace) {
+            return new ResourceCriterion(null, Objects.requireNonNull(namespace, "namespace"));
+        }
+
+        public boolean matches(ResourceLocation value) {
+            if (this.exact != null) {
+                return this.exact.equals(value);
+            }
+
+            return this.namespace.equals(value.getNamespace());
+        }
+
+        public Optional<ResourceLocation> exactOptional() {
+            return Optional.ofNullable(this.exact);
+        }
+    }
+
+    public record BiomeCriterion(ResourceKey<Biome> biome, TagKey<Biome> tag, String namespace) {
         public static BiomeCriterion biome(ResourceKey<Biome> biome) {
-            return new BiomeCriterion(Objects.requireNonNull(biome, "biome"), null);
+            return new BiomeCriterion(Objects.requireNonNull(biome, "biome"), null, null);
         }
 
         public static BiomeCriterion tag(TagKey<Biome> tag) {
-            return new BiomeCriterion(null, Objects.requireNonNull(tag, "tag"));
+            return new BiomeCriterion(null, Objects.requireNonNull(tag, "tag"), null);
+        }
+
+        public static BiomeCriterion namespace(String namespace) {
+            return new BiomeCriterion(null, null, Objects.requireNonNull(namespace, "namespace"));
         }
 
         public boolean matches(Holder<Biome> holder) {
-            return this.tag != null ? holder.is(this.tag) : holder.is(this.biome);
+            if (this.tag != null) {
+                return holder.is(this.tag);
+            }
+
+            if (this.namespace != null) {
+                return holder.unwrapKey()
+                        .map(key -> this.namespace.equals(key.location().getNamespace()))
+                        .orElse(false);
+            }
+
+            return holder.is(this.biome);
         }
 
         public boolean isTag() {
@@ -700,14 +795,24 @@ public final class VeinConfig {
         }
 
         public String asString() {
-            return this.tag != null ? "#" + this.tag.location() : this.biome.location().toString();
+            if (this.tag != null) {
+                return "#" + this.tag.location();
+            }
+
+            if (this.namespace != null) {
+                return this.namespace + ":*";
+            }
+
+            return this.biome.location().toString();
         }
     }
 
     public record VeinDefinition(
             String id,
-            List<ResourceKey<Level>> dimensions,
-            List<BiomeCriterion> biomes,
+            List<ResourceCriterion> dimensionWhitelist,
+            List<ResourceCriterion> dimensionBlacklist,
+            List<BiomeCriterion> biomeWhitelist,
+            List<BiomeCriterion> biomeBlacklist,
             List<BlockState> blocks,
             List<Integer> weights,
             VeinShape shape,
@@ -725,8 +830,10 @@ public final class VeinConfig {
     ) {
         public VeinDefinition {
             Objects.requireNonNull(id, "id");
-            Objects.requireNonNull(dimensions, "dimensions");
-            Objects.requireNonNull(biomes, "biomes");
+            Objects.requireNonNull(dimensionWhitelist, "dimensionWhitelist");
+            Objects.requireNonNull(dimensionBlacklist, "dimensionBlacklist");
+            Objects.requireNonNull(biomeWhitelist, "biomeWhitelist");
+            Objects.requireNonNull(biomeBlacklist, "biomeBlacklist");
             Objects.requireNonNull(blocks, "blocks");
             Objects.requireNonNull(weights, "weights");
             Objects.requireNonNull(shape, "shape");
@@ -736,21 +843,22 @@ public final class VeinConfig {
         }
 
         public boolean matchesDimension(ResourceKey<Level> dimension) {
-            return this.dimensions.contains(dimension);
+            ResourceLocation dimensionId = dimension.location();
+            if (this.dimensionBlacklist.stream().anyMatch(criterion -> criterion.matches(dimensionId))) {
+                return false;
+            }
+
+            return this.dimensionWhitelist.isEmpty() || this.dimensionWhitelist.stream().anyMatch(criterion -> criterion.matches(dimensionId));
         }
 
         public boolean matchesBiome(Holder<Biome> biome) {
-            if (this.biomes.isEmpty()) {
-                return true;
-            }
-
-            for (BiomeCriterion criterion : this.biomes) {
+            for (BiomeCriterion criterion : this.biomeBlacklist) {
                 if (criterion.matches(biome)) {
-                    return true;
+                    return false;
                 }
             }
 
-            return false;
+            return this.biomeWhitelist.isEmpty() || this.biomeWhitelist.stream().anyMatch(criterion -> criterion.matches(biome));
         }
 
         public boolean allowsPosition(ResourceKey<Level> dimension, BlockPos pos) {
@@ -784,7 +892,13 @@ public final class VeinConfig {
         }
 
         public ResourceKey<Level> primaryDimension() {
-            return this.dimensions.isEmpty() ? Level.OVERWORLD : this.dimensions.getFirst();
+            return this.dimensionWhitelist.stream()
+                    .map(ResourceCriterion::exactOptional)
+                    .filter(Optional::isPresent)
+                    .map(Optional::get)
+                    .findFirst()
+                    .map(location -> ResourceKey.create(Registries.DIMENSION, location))
+                    .orElse(Level.OVERWORLD);
         }
 
         public int pickRadius(RandomSource random) {

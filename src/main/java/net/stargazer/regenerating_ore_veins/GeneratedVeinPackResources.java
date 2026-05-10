@@ -4,6 +4,7 @@ import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -192,12 +193,13 @@ public final class GeneratedVeinPackResources extends AbstractPackResources {
     }
 
     private static String biomeSelectorJson(VeinConfig.VeinDefinition vein) {
-        if (vein.biomes().size() == 1) {
-            return quote(vein.biomes().getFirst().asString());
+        List<VeinConfig.BiomeCriterion> biomes = vein.biomeBlacklist().isEmpty() ? vein.biomeWhitelist() : List.of();
+        if (biomes.size() == 1 && biomes.getFirst().namespace() == null) {
+            return quote(biomes.getFirst().asString());
         }
 
-        if (vein.biomes().size() > 1 && vein.biomes().stream().noneMatch(VeinConfig.BiomeCriterion::isTag)) {
-            return "[" + vein.biomes().stream().map(criterion -> quote(criterion.asString())).collect(java.util.stream.Collectors.joining(", ")) + "]";
+        if (biomes.size() > 1 && biomes.stream().noneMatch(VeinConfig.BiomeCriterion::isTag) && biomes.stream().noneMatch(criterion -> criterion.namespace() != null)) {
+            return "[" + biomes.stream().map(criterion -> quote(criterion.asString())).collect(java.util.stream.Collectors.joining(", ")) + "]";
         }
 
         return quote(dimensionBiomeSelector(vein));

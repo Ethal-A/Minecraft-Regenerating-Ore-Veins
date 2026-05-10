@@ -133,11 +133,11 @@ The following example shows how you can configure a vein.
       2,
       4
     ],
-    "dimension": [
+    "dimension_whitelist": [
       "minecraft:overworld",
       "minecraft:the_nether"
     ],
-    "biome": [
+    "biome_whitelist": [
       "minecraft:badlands",
       "#c:is_jungle",
       "minecraft:nether_wastes"
@@ -167,8 +167,10 @@ Supported/optional fields:
 
 - `area_whitelist` accepts a string or list of area names. If provided, the vein only generates inside those areas.
 - `area_blacklist` accepts a string or list of area names. If provided, the vein never generates inside those areas.
-- `dimension` accepts a string or list and defaults to `minecraft:overworld`. The vanilla Nether id is `minecraft:the_nether`, though `minecraft:nether` is accepted as an alias.
-- `biome` accepts a string or list. Entries can be exact biome ids such as `minecraft:plains` or tags prefixed with `#`, such as `#c:is_jungle`.
+- `dimension_whitelist` accepts a string or list. If provided, the vein only generates in those dimensions.
+- `dimension_blacklist` accepts a string or list. If provided, the vein never generates in those dimensions. Blacklist wins if it overlaps the whitelist.
+- `biome_whitelist` accepts a string or list. If provided, the vein only generates in those biomes.
+- `biome_blacklist` accepts a string or list. If provided, the vein never generates in those biomes. Blacklist wins if it overlaps the whitelist.
 - `weights` defaults to `1` for each block
 - `shape` supports `sphere` and `box`
 - `min_radius` and `max_radius` choose a random radius in blocks for each vein. For `sphere`, this is the radius of a sphere-like vein. For `box`, this is the half-extent of a cube from the center.
@@ -177,7 +179,13 @@ Supported/optional fields:
 - `regeneration_interval_seconds` defaults to `global.json` value `default_regeneration_seconds`
 - `regeneration_interval_jitter` defaults to `global.json` value `default_jitter_interval`
 
-If whitelist and blacklist overlap, `area_blacklist` wins. `dimension` is still applied when area filters are present, so admins can combine dimension, area, biome, and Y-level limits. The default `veins.json` examples are not area-constrained and include Overworld and Nether examples. Vanilla Minecraft does not have separate Overworld quartz ore or netherite ore blocks, so the default examples use `minecraft:quartz_block` for the quartz example and `minecraft:ancient_debris` for netherite.
+Regarding the filters:
+
+- Dimension and biome filters support exact ids and namespace wildcards such as `biomeswevegone:*`. The vanilla Nether id is `minecraft:the_nether`, though `minecraft:nether` is accepted as an alias for dimensions.
+- Biome filters also support tags prefixed with `#`, such as `#c:is_jungle`.
+- Empty whitelist/blacklist lists are treated as omitted.
+
+If whitelist and blacklist overlap, blacklists win. Dimension, area, biome, and Y-level filters are combined, so admins can make a vein generate only where all configured filters match. The default `veins.json` examples are not area-constrained and include Overworld and Nether examples. Vanilla Minecraft does not have separate Overworld quartz ore or netherite ore blocks, so the default examples use `minecraft:quartz_block` for the quartz example and `minecraft:ancient_debris` for netherite.
 
 Expected blocks generated with `fill_factor: 1.0`:
 
